@@ -10,18 +10,23 @@ try {
 
     $stmt = $conn->prepare("
         SELECT 
-            id,
-            user_id,
-            location_name,
-            latitude,
-            longitude,
-            category,
-            severity,
-            description,
-            status,
-            created_at
-        FROM outage_reports
-        ORDER BY created_at DESC
+            r.id,
+            r.user_id,
+            u.name AS reporter_name,
+            r.location_name,
+            r.latitude,
+            r.longitude,
+            r.category,
+            r.severity,
+            r.description,
+            r.image_proof,
+            r.status,
+            r.verified_by,
+            r.created_at,
+            r.updated_at
+        FROM outage_reports r
+        LEFT JOIN users u ON r.user_id = u.id
+        ORDER BY r.created_at DESC
     ");
 
     $stmt->execute();
@@ -40,7 +45,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Failed to fetch reports",
-        "error" => $e->getMessage()
+        "message" => "Failed to fetch reports"
     ]);
 }

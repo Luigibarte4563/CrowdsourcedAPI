@@ -8,31 +8,80 @@ $conn = getConnection();
 
 $data = json_decode(file_get_contents("php://input"), true);
 
-// Required fields
-$user_id = $data["user_id"] ?? null;
-$location_name = $data["location_name"] ?? null;
-$description = $data["description"] ?? null;
+if (!$data) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "No input data provided"
+    ]);
+    exit;
+}
 
-// Optional fields
+/* =========================
+   REQUIRED FIELDS
+========================= */
+$user_id = $data["user_id"] ?? null;
+$location_name = trim($data["location_name"] ?? "");
+$description = trim($data["description"] ?? "");
+
+/* =========================
+   OPTIONAL FIELDS
+========================= */
 $latitude = $data["latitude"] ?? null;
 $longitude = $data["longitude"] ?? null;
 
 $category = $data["category"] ?? "power_outage";
 $severity = $data["severity"] ?? "moderate";
+
+$image_proof = $data["image_proof"] ?? null;
+
 $status = $data["status"] ?? "unverified";
 
-// Validation
+/* =========================
+   VALIDATION
+========================= */
 if (!$user_id || !$location_name || !$description) {
     http_response_code(400);
-
     echo json_encode([
         "success" => false,
         "message" => "Missing required fields"
     ]);
-
     exit;
 }
 
+/* =========================
+   VALID ENUM SAFETY (IMPORTANT)
+========================= */
+
+$allowedCategory = [
+    'power_outage',
+    'low_voltage',
+    'power_fluctuation',
+    'transformer_explosion',
+    'fallen_power_line',
+    'electrical_fire',
+    'scheduled_maintenance',
+    'unknown_issue'
+];
+
+$allowedSeverity = ['minor', 'moderate', 'critical'];
+$allowedStatus = ['unverified', 'under_review', 'verified', 'resolved', 'fake_report'];
+
+if (!in_array($category, $allowedCategory)) {
+    $category = "power_outage";
+}
+
+if (!in_array($severity, $allowedSeverity)) {
+    $severity = "moderate";
+}
+
+if (!in_array($status, $allowedStatus)) {
+    $status = "unverified";
+}
+
+/* =========================
+   INSERT DATA
+========================= */
 try {
 
     $stmt = $conn->prepare("
@@ -45,6 +94,7 @@ try {
             category,
             severity,
             description,
+            image_proof,
             status
         )
         VALUES
@@ -56,6 +106,7 @@ try {
             :category,
             :severity,
             :description,
+            :image_proof,
             :status
         )
     ");
@@ -68,6 +119,7 @@ try {
         ":category" => $category,
         ":severity" => $severity,
         ":description" => $description,
+        ":image_proof" => $image_proof,
         ":status" => $status
     ]);
 
@@ -84,8 +136,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Failed to create report",
-        "error" => $e->getMessage()
+        "message" => "Failed to create report"
     ]);
 }
-?>
