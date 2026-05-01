@@ -80,3 +80,56 @@ CREATE TABLE outage_reports (
         ON DELETE SET NULL
 
 );
+
+CREATE TABLE power_stations (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    created_by INT NULL,
+
+    station_name VARCHAR(255) NOT NULL,
+
+    location_name VARCHAR(255) NOT NULL,
+
+    latitude DECIMAL(10,8),
+
+    longitude DECIMAL(11,8),
+
+    station_type ENUM(
+        'power_station',
+        'solar_station',
+        'charging_station',
+        'generator_station'
+    ) NOT NULL,
+
+    access_type ENUM(
+        'free',
+        'paid'
+    ) DEFAULT 'free',
+
+    availability_status ENUM(
+        'available',
+        'busy',
+        'offline',
+        'maintenance'
+    ) DEFAULT 'available',
+
+    operating_hours VARCHAR(100) NULL,
+
+    charging_type VARCHAR(100) NULL,
+
+    description TEXT,
+
+    image TEXT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_station_user
+        FOREIGN KEY (created_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
+
+);
