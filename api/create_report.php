@@ -2,45 +2,60 @@
 
 header("Content-Type: application/json");
 
-include "../config/db_connect.php";
+require_once "../config/db_connect.php";
 
 $conn = getConnection();
 
+session_start();
+
+/* =========================================
+   HYBRID INPUT (JSON + POST + GET)
+========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (!$data) {
-    http_response_code(400);
+    $data = $_POST;
+}
+
+if (!$data) {
+    $data = $_GET;
+}
+
+/* =========================================
+   USER AUTH (SESSION PRIORITY)
+========================================= */
+$user_id = $_SESSION['user_id'] ?? ($data['user_id'] ?? null);
+
+if (!$user_id) {
+    http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "No input data provided"
+        "message" => "Unauthorized: Please login first"
     ]);
     exit;
 }
 
-/* =========================
+/* =========================================
    REQUIRED FIELDS
-========================= */
-$user_id = $data["user_id"] ?? null;
+========================================= */
 $location_name = trim($data["location_name"] ?? "");
-$description = trim($data["description"] ?? "");
+$description   = trim($data["description"] ?? "");
 
-/* =========================
+/* =========================================
    OPTIONAL FIELDS
-========================= */
-$latitude = $data["latitude"] ?? null;
+========================================= */
+$latitude  = $data["latitude"] ?? null;
 $longitude = $data["longitude"] ?? null;
 
-$category = $data["category"] ?? "power_outage";
-$severity = $data["severity"] ?? "moderate";
-
+$category  = $data["category"] ?? "power_outage";
+$severity  = $data["severity"] ?? "moderate";
 $image_proof = $data["image_proof"] ?? null;
+$status    = $data["status"] ?? "unverified";
 
-$status = $data["status"] ?? "unverified";
-
-/* =========================
+/* =========================================
    VALIDATION
-========================= */
-if (!$user_id || !$location_name || !$description) {
+========================================= */
+if ($location_name === "" || $description === "") {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -49,10 +64,9 @@ if (!$user_id || !$location_name || !$description) {
     exit;
 }
 
-/* =========================
-   VALID ENUM SAFETY (IMPORTANT)
-========================= */
-
+/* =========================================
+   ENUM VALIDATION
+========================================= */
 $allowedCategory = [
     'power_outage',
     'low_voltage',
@@ -65,7 +79,7 @@ $allowedCategory = [
 ];
 
 $allowedSeverity = ['minor', 'moderate', 'critical'];
-$allowedStatus = ['unverified', 'under_review', 'verified', 'resolved', 'fake_report'];
+$allowedStatus   = ['unverified', 'under_review', 'verified', 'resolved', 'fake_report'];
 
 if (!in_array($category, $allowedCategory)) {
     $category = "power_outage";
@@ -79,12 +93,12 @@ if (!in_array($status, $allowedStatus)) {
     $status = "unverified";
 }
 
-/* =========================
-   INSERT DATA
-========================= */
+/* =========================================
+   INSERT INTO DATABASE
+========================================= */
 try {
 
-    $stmt = $conn->prepare("
+    $sql = "
         INSERT INTO outage_reports
         (
             user_id,
@@ -109,25 +123,33 @@ try {
             :image_proof,
             :status
         )
-    ");
+    ";
+
+    $stmt = $conn->prepare($sql);
 
     $stmt->execute([
-        ":user_id" => $user_id,
+        ":user_id"       => $user_id,
         ":location_name" => $location_name,
-        ":latitude" => $latitude,
-        ":longitude" => $longitude,
-        ":category" => $category,
-        ":severity" => $severity,
-        ":description" => $description,
-        ":image_proof" => $image_proof,
-        ":status" => $status
+        ":latitude"      => $latitude,
+        ":longitude"     => $longitude,
+        ":category"      => $category,
+        ":severity"      => $severity,
+        ":description"   => $description,
+        ":image_proof"   => $image_proof,
+        ":status"        => $status
     ]);
 
     http_response_code(201);
 
     echo json_encode([
         "success" => true,
-        "message" => "Report created successfully"
+        "message" => "Report created successfully",
+        "data" => [
+            "user_id" => $user_id,
+            "location_name" => $location_name,
+            "category" => $category,
+            "severity" => $severity
+        ]
     ]);
 
 } catch (PDOException $e) {
@@ -136,6 +158,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Failed to create report"
+        "message" => "Database error"
     ]);
 }
