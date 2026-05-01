@@ -2,29 +2,33 @@
 
 header("Content-Type: application/json");
 
-require_once "../config/db_connect.php";
+require_once "../../config/db_connect.php";
 
 $conn = getConnection();
-
 session_start();
 
 /* =========================================
-   HYBRID INPUT (JSON + POST + GET)
+   ONLY JSON INPUT
 ========================================= */
-$data = json_decode(file_get_contents("php://input"), true);
+$raw = file_get_contents("php://input");
+$data = json_decode($raw, true);
 
+/* =========================================
+   VALID JSON CHECK
+========================================= */
 if (!$data) {
-    $data = $_POST;
-}
-
-if (!$data) {
-    $data = $_GET;
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid JSON body"
+    ]);
+    exit;
 }
 
 /* =========================================
-   USER AUTH (SESSION PRIORITY)
+   USER AUTH (SESSION ONLY)
 ========================================= */
-$user_id = $_SESSION['user_id'] ?? ($data['user_id'] ?? null);
+$user_id = $_SESSION['user_id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
@@ -36,14 +40,11 @@ if (!$user_id) {
 }
 
 /* =========================================
-   REQUIRED FIELDS
+   INPUTS
 ========================================= */
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
-/* =========================================
-   OPTIONAL FIELDS
-========================================= */
 $latitude  = $data["latitude"] ?? null;
 $longitude = $data["longitude"] ?? null;
 
@@ -59,7 +60,7 @@ if ($location_name === "" || $description === "") {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Missing required fields"
+        "message" => "location_name and description are required"
     ]);
     exit;
 }
@@ -98,9 +99,8 @@ if (!in_array($status, $allowedStatus)) {
 ========================================= */
 try {
 
-    $sql = "
-        INSERT INTO outage_reports
-        (
+    $stmt = $conn->prepare("
+        INSERT INTO outage_reports (
             user_id,
             location_name,
             latitude,
@@ -110,9 +110,7 @@ try {
             description,
             image_proof,
             status
-        )
-        VALUES
-        (
+        ) VALUES (
             :user_id,
             :location_name,
             :latitude,
@@ -123,33 +121,25 @@ try {
             :image_proof,
             :status
         )
-    ";
-
-    $stmt = $conn->prepare($sql);
+    ");
 
     $stmt->execute([
-        ":user_id"       => $user_id,
+        ":user_id" => $user_id,
         ":location_name" => $location_name,
-        ":latitude"      => $latitude,
-        ":longitude"     => $longitude,
-        ":category"      => $category,
-        ":severity"      => $severity,
-        ":description"   => $description,
-        ":image_proof"   => $image_proof,
-        ":status"        => $status
+        ":latitude" => $latitude,
+        ":longitude" => $longitude,
+        ":category" => $category,
+        ":severity" => $severity,
+        ":description" => $description,
+        ":image_proof" => $image_proof,
+        ":status" => $status
     ]);
 
     http_response_code(201);
 
     echo json_encode([
         "success" => true,
-        "message" => "Report created successfully",
-        "data" => [
-            "user_id" => $user_id,
-            "location_name" => $location_name,
-            "category" => $category,
-            "severity" => $severity
-        ]
+        "message" => "Report created successfully"
     ]);
 
 } catch (PDOException $e) {

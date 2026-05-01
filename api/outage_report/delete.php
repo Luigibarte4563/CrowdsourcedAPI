@@ -2,7 +2,7 @@
 
 header("Content-Type: application/json");
 
-include "../config/db_connect.php";
+include "../../config/db_connect.php";
 
 $conn = getConnection();
 
@@ -18,6 +18,7 @@ if (!$data) {
 }
 
 $id = $data["id"] ?? null;
+$user_id = $data["user_id"] ?? null; // optional but recommended
 
 if (!$id) {
     http_response_code(400);
@@ -31,17 +32,21 @@ if (!$id) {
 try {
 
     /* ======================================
-       CHECK IF REPORT EXISTS
+       OPTIONAL: CHECK IF REPORT EXISTS
     ====================================== */
     $check = $conn->prepare("
-        SELECT id FROM outage_reports WHERE id = :id
+        SELECT id, user_id
+        FROM outage_reports
+        WHERE id = :id
     ");
 
     $check->execute([
         ":id" => $id
     ]);
 
-    if ($check->rowCount() === 0) {
+    $report = $check->fetch(PDO::FETCH_ASSOC);
+
+    if (!$report) {
         http_response_code(404);
         echo json_encode([
             "success" => false,
@@ -51,37 +56,36 @@ try {
     }
 
     /* ======================================
-       UPDATE REPORT
+       OPTIONAL SECURITY CHECK (OWNER ONLY)
+       Uncomment if you want strict control
+    ====================================== */
+
+    /*
+    if ($user_id && $report["user_id"] != $user_id) {
+        http_response_code(403);
+        echo json_encode([
+            "success" => false,
+            "message" => "You are not allowed to delete this report"
+        ]);
+        exit;
+    }
+    */
+
+    /* ======================================
+       DELETE REPORT
     ====================================== */
     $stmt = $conn->prepare("
-        UPDATE outage_reports SET
-            location_name = :location_name,
-            latitude = :latitude,
-            longitude = :longitude,
-            category = :category,
-            severity = :severity,
-            description = :description,
-            image_proof = :image_proof,
-            status = :status,
-            updated_at = CURRENT_TIMESTAMP
+        DELETE FROM outage_reports
         WHERE id = :id
     ");
 
     $stmt->execute([
-        ":location_name" => $data["location_name"] ?? null,
-        ":latitude" => $data["latitude"] ?? null,
-        ":longitude" => $data["longitude"] ?? null,
-        ":category" => $data["category"] ?? "power_outage",
-        ":severity" => $data["severity"] ?? "moderate",
-        ":description" => $data["description"] ?? null,
-        ":image_proof" => $data["image_proof"] ?? null,
-        ":status" => $data["status"] ?? "unverified",
         ":id" => $id
     ]);
 
     echo json_encode([
         "success" => true,
-        "message" => "Report updated successfully"
+        "message" => "Report deleted successfully"
     ]);
 
 } catch (PDOException $e) {
@@ -90,6 +94,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Failed to update report"
+        "message" => "Failed to delete report"
     ]);
 }

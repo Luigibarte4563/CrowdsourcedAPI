@@ -2,7 +2,7 @@
 
 header("Content-Type: application/json");
 
-include "../config/db_connect.php";
+include "../../config/db_connect.php";
 
 $conn = getConnection();
 
