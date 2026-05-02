@@ -2,11 +2,26 @@
 
 header("Content-Type: application/json");
 
+session_start();
+
 require_once __DIR__ . '/../../config/db_connect.php';
-require_once __DIR__ . '/../../config/env.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
+
+/* =========================================
+   CHECK SESSION (ONLY AUTH SOURCE)
+========================================= */
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized"
+    ]);
+    exit;
+}
 
 /* =========================================
    INPUT JSON
@@ -17,90 +32,67 @@ if (!$data) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Invalid JSON body"
+        "message" => "Invalid JSON"
     ]);
     exit;
 }
 
 /* =========================================
-   REQUIRED INPUTS
+   REQUIRED
 ========================================= */
-$user_id = $data["user_id"] ?? null;
-$id      = $data["id"] ?? null; // IMPORTANT: this is your real primary key
+$id = $data["id"] ?? null;
 
-if (!$user_id || !$id) {
+if (!$id) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "user_id and id are required"
+        "message" => "Report ID required"
     ]);
     exit;
 }
 
 /* =========================================
-   CHECK IF REPORT EXISTS + OWNERSHIP
+   GET OWN REPORT ONLY
 ========================================= */
 $stmt = $conn->prepare("
-    SELECT * FROM outage_reports 
-    WHERE id = :id
+    SELECT * FROM outage_reports
+    WHERE id = :id AND user_id = :user_id
     LIMIT 1
 ");
 
-$stmt->execute([":id" => $id]);
+$stmt->execute([
+    ":id" => $id,
+    ":user_id" => $user_id
+]);
+
 $report = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$report) {
-    http_response_code(404);
-    echo json_encode([
-        "success" => false,
-        "message" => "Report not found"
-    ]);
-    exit;
-}
-
-if ($report["user_id"] != $user_id) {
     http_response_code(403);
     echo json_encode([
         "success" => false,
-        "message" => "You are not allowed to update this report"
+        "message" => "Report not found or not yours"
     ]);
     exit;
 }
 
 /* =========================================
-   FIELDS (FALLBACK TO EXISTING VALUES)
+   FIELDS
 ========================================= */
 $location_name   = trim($data["location_name"] ?? $report["location_name"]);
 $description     = trim($data["description"] ?? $report["description"]);
 $category        = $data["category"] ?? $report["category"];
 $severity        = $data["severity"] ?? $report["severity"];
-$image_proof     = $data["image_proof"] ?? $report["image_proof"];
 $affected_houses = $data["affected_houses"] ?? $report["affected_houses"];
-$is_active       = $data["is_active"] ?? $report["is_active"];
-$hazard_type     = $data["hazard_type"] ?? $report["hazard_type"];
-$started_at      = $data["started_at"] ?? $report["started_at"];
 $status          = $data["status"] ?? $report["status"];
-$verified_by     = $data["verified_by"] ?? $report["verified_by"];
 
 /* =========================================
-   VALIDATION
-========================================= */
-if ($location_name === "" || $description === "") {
-    http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "location_name and description are required"
-    ]);
-    exit;
-}
-
-/* =========================================
-   GET COORDINATES (if location changed OR always safe)
+   COORDINATES ONLY IF CHANGED
 ========================================= */
 $geo = getCoordinates($location_name);
 
 if (!$geo["success"]) {
-    http_response_code(404);
+    http_response_code(400);
     echo json_encode([
         "success" => false,
         "message" => $geo["message"]
@@ -112,81 +104,35 @@ $latitude  = $geo["latitude"];
 $longitude = $geo["longitude"];
 
 /* =========================================
-   ENUM SAFETY
+   UPDATE
 ========================================= */
-$allowedCategory = [
-    'power_outage',
-    'low_voltage',
-    'power_fluctuation',
-    'transformer_explosion',
-    'fallen_power_line',
-    'electrical_fire',
-    'scheduled_maintenance',
-    'unknown_issue'
-];
+$stmt = $conn->prepare("
+    UPDATE outage_reports SET
+        location_name = :location_name,
+        latitude = :latitude,
+        longitude = :longitude,
+        category = :category,
+        severity = :severity,
+        description = :description,
+        affected_houses = :affected_houses,
+        status = :status
+    WHERE id = :id AND user_id = :user_id
+");
 
-$allowedSeverity = ['minor', 'moderate', 'critical'];
-$allowedActive   = ['yes', 'no', 'unknown'];
-$allowedHazard   = ['none', 'smoke', 'sparks', 'fire', 'fallen_wire', 'explosion_sound'];
-$allowedStatus   = ['unverified', 'under_review', 'verified', 'resolved', 'fake_report'];
+$success = $stmt->execute([
+    ":id" => $id,
+    ":user_id" => $user_id,
+    ":location_name" => $location_name,
+    ":latitude" => $latitude,
+    ":longitude" => $longitude,
+    ":category" => $category,
+    ":severity" => $severity,
+    ":description" => $description,
+    ":affected_houses" => $affected_houses,
+    ":status" => $status
+]);
 
-if (!in_array($category, $allowedCategory)) $category = "power_outage";
-if (!in_array($severity, $allowedSeverity)) $severity = "moderate";
-if (!in_array($is_active, $allowedActive)) $is_active = "yes";
-if (!in_array($hazard_type, $allowedHazard)) $hazard_type = "none";
-if (!in_array($status, $allowedStatus)) $status = "unverified";
-
-/* =========================================
-   UPDATE QUERY
-========================================= */
-try {
-
-    $stmt = $conn->prepare("
-        UPDATE outage_reports SET
-            location_name = :location_name,
-            latitude = :latitude,
-            longitude = :longitude,
-            category = :category,
-            severity = :severity,
-            description = :description,
-            image_proof = :image_proof,
-            affected_houses = :affected_houses,
-            is_active = :is_active,
-            hazard_type = :hazard_type,
-            started_at = :started_at,
-            status = :status,
-            verified_by = :verified_by
-        WHERE id = :id AND user_id = :user_id
-    ");
-
-    $stmt->execute([
-        ":id" => $id,
-        ":user_id" => $user_id,
-        ":location_name" => $location_name,
-        ":latitude" => $latitude,
-        ":longitude" => $longitude,
-        ":category" => $category,
-        ":severity" => $severity,
-        ":description" => $description,
-        ":image_proof" => $image_proof,
-        ":affected_houses" => $affected_houses,
-        ":is_active" => $is_active,
-        ":hazard_type" => $hazard_type,
-        ":started_at" => $started_at,
-        ":status" => $status,
-        ":verified_by" => $verified_by
-    ]);
-
-    echo json_encode([
-        "success" => true,
-        "message" => "Report updated successfully"
-    ]);
-
-} catch (PDOException $e) {
-
-    http_response_code(500);
-    echo json_encode([
-        "success" => false,
-        "message" => "Database error"
-    ]);
-}
+echo json_encode([
+    "success" => $success,
+    "message" => $success ? "Report updated successfully" : "Update failed"
+]);
