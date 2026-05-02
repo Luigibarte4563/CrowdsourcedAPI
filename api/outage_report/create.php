@@ -2,71 +2,86 @@
 
 header("Content-Type: application/json");
 
-require_once "../../config/db_connect.php";
+require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../config/env.php';
+require_once __DIR__ . '../../services/get_coordinates.php';
 
 $conn = getConnection();
-session_start();
 
 /* =========================================
-   ONLY JSON INPUT
+   INPUT JSON
 ========================================= */
-$raw = file_get_contents("php://input");
-$data = json_decode($raw, true);
+$data = json_decode(file_get_contents("php://input"), true);
 
-/* =========================================
-   VALID JSON CHECK
-========================================= */
 if (!$data) {
+
     http_response_code(400);
+
     echo json_encode([
         "success" => false,
         "message" => "Invalid JSON body"
     ]);
+
     exit;
 }
 
 /* =========================================
-   USER AUTH (SESSION ONLY)
+   REQUIRED INPUTS
 ========================================= */
-$user_id = $_SESSION['user_id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized: Please login first"
-    ]);
-    exit;
-}
-
-/* =========================================
-   INPUTS
-========================================= */
+$user_id       = $data["user_id"] ?? null;
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
-$latitude  = $data["latitude"] ?? null;
-$longitude = $data["longitude"] ?? null;
-
-$category  = $data["category"] ?? "power_outage";
-$severity  = $data["severity"] ?? "moderate";
-$image_proof = $data["image_proof"] ?? null;
-$status    = $data["status"] ?? "unverified";
+/* =========================================
+   OPTIONAL INPUTS
+========================================= */
+$category        = $data["category"] ?? "power_outage";
+$severity        = $data["severity"] ?? "moderate";
+$image_proof     = $data["image_proof"] ?? null;
+$affected_houses = $data["affected_houses"] ?? 1;
+$is_active       = $data["is_active"] ?? "yes";
+$hazard_type     = $data["hazard_type"] ?? "none";
+$started_at      = $data["started_at"] ?? null;
+$status          = $data["status"] ?? "unverified";
+$verified_by     = $data["verified_by"] ?? null;
 
 /* =========================================
    VALIDATION
 ========================================= */
-if ($location_name === "" || $description === "") {
+if (!$user_id || $location_name === "" || $description === "") {
+
     http_response_code(400);
+
     echo json_encode([
         "success" => false,
-        "message" => "location_name and description are required"
+        "message" => "user_id, location_name, and description are required"
     ]);
+
     exit;
 }
 
 /* =========================================
-   ENUM VALIDATION
+   GET COORDINATES
+========================================= */
+$geo = getCoordinates($location_name);
+
+if (!$geo["success"]) {
+
+    http_response_code(404);
+
+    echo json_encode([
+        "success" => false,
+        "message" => $geo["message"]
+    ]);
+
+    exit;
+}
+
+$latitude  = $geo["latitude"];
+$longitude = $geo["longitude"];
+
+/* =========================================
+   ENUM SAFETY (optional protection)
 ========================================= */
 $allowedCategory = [
     'power_outage',
@@ -80,19 +95,15 @@ $allowedCategory = [
 ];
 
 $allowedSeverity = ['minor', 'moderate', 'critical'];
+$allowedActive   = ['yes', 'no', 'unknown'];
+$allowedHazard   = ['none', 'smoke', 'sparks', 'fire', 'fallen_wire', 'explosion_sound'];
 $allowedStatus   = ['unverified', 'under_review', 'verified', 'resolved', 'fake_report'];
 
-if (!in_array($category, $allowedCategory)) {
-    $category = "power_outage";
-}
-
-if (!in_array($severity, $allowedSeverity)) {
-    $severity = "moderate";
-}
-
-if (!in_array($status, $allowedStatus)) {
-    $status = "unverified";
-}
+if (!in_array($category, $allowedCategory)) $category = "power_outage";
+if (!in_array($severity, $allowedSeverity)) $severity = "moderate";
+if (!in_array($is_active, $allowedActive)) $is_active = "yes";
+if (!in_array($hazard_type, $allowedHazard)) $hazard_type = "none";
+if (!in_array($status, $allowedStatus)) $status = "unverified";
 
 /* =========================================
    INSERT INTO DATABASE
@@ -109,7 +120,12 @@ try {
             severity,
             description,
             image_proof,
-            status
+            affected_houses,
+            is_active,
+            hazard_type,
+            started_at,
+            status,
+            verified_by
         ) VALUES (
             :user_id,
             :location_name,
@@ -119,7 +135,12 @@ try {
             :severity,
             :description,
             :image_proof,
-            :status
+            :affected_houses,
+            :is_active,
+            :hazard_type,
+            :started_at,
+            :status,
+            :verified_by
         )
     ");
 
@@ -132,14 +153,22 @@ try {
         ":severity" => $severity,
         ":description" => $description,
         ":image_proof" => $image_proof,
-        ":status" => $status
+        ":affected_houses" => $affected_houses,
+        ":is_active" => $is_active,
+        ":hazard_type" => $hazard_type,
+        ":started_at" => $started_at,
+        ":status" => $status,
+        ":verified_by" => $verified_by
     ]);
-
-    http_response_code(201);
 
     echo json_encode([
         "success" => true,
-        "message" => "Report created successfully"
+        "message" => "Outage report created successfully",
+        "data" => [
+            "location_name" => $location_name,
+            "latitude" => $latitude,
+            "longitude" => $longitude
+        ]
     ]);
 
 } catch (PDOException $e) {
