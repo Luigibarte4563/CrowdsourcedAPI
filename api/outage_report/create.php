@@ -2,11 +2,27 @@
 
 header("Content-Type: application/json");
 
+session_start();
+
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../config/env.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
+
+/* =========================================
+   GET USER FROM SESSION (FIX)
+========================================= */
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (no session)"
+    ]);
+    exit;
+}
 
 /* =========================================
    INPUT JSON
@@ -25,24 +41,21 @@ if (!$data) {
 /* =========================================
    REQUIRED INPUTS
 ========================================= */
-$user_id       = $data["user_id"] ?? null;
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
-/* =========================================
-   VALIDATION
-========================================= */
-if (!$user_id || $location_name === "" || $description === "") {
+/* FIX: REMOVE user_id FROM INPUT VALIDATION */
+if ($location_name === "" || $description === "") {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "user_id, location_name, and description are required"
+        "message" => "location_name and description are required"
     ]);
     exit;
 }
 
 /* =========================================
-   GET COORDINATES (SAFE)
+   GET COORDINATES
 ========================================= */
 $geo = getCoordinates($location_name);
 
@@ -59,7 +72,7 @@ $latitude  = $geo["latitude"];
 $longitude = $geo["longitude"];
 
 /* =========================================
-   OPTIONAL INPUTS (NOW MATCH DB EXACTLY)
+   OPTIONAL FIELDS
 ========================================= */
 $category        = $data["category"] ?? "power_outage";
 $severity        = $data["severity"] ?? "moderate";
@@ -68,11 +81,11 @@ $affected_houses = $data["affected_houses"] ?? 1;
 $is_active       = $data["is_active"] ?? "yes";
 $hazard_type     = $data["hazard_type"] ?? "none";
 $started_at      = $data["started_at"] ?? null;
-$status          = $data["status"] ?? "unverified";
-$verified_by     = $data["verified_by"] ?? null;
+$status          = "unverified";
+$verified_by     = null;
 
 /* =========================================
-   INSERT INTO DATABASE
+   INSERT
 ========================================= */
 try {
 
@@ -138,7 +151,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error",
-        "error" => $e->getMessage() // remove in production
+        "message" => "Database error"
     ]);
 }
