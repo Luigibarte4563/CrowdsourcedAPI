@@ -12,42 +12,36 @@ $conn = getConnection();
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (!$data) {
-
     http_response_code(400);
-
     echo json_encode([
         "success" => false,
         "message" => "Invalid JSON body"
     ]);
-
     exit;
 }
 
 /* =========================================
    REQUIRED INPUT
 ========================================= */
-$id = $data["id"] ?? null;
-$user_id = $data["user_id"] ?? null;
+$id = (int)($data["id"] ?? 0);
+$user_id = (int)($data["user_id"] ?? 0);
 
 /* =========================================
    VALIDATION
 ========================================= */
-if (!$id || !$user_id) {
-
+if ($id <= 0 || $user_id <= 0) {
     http_response_code(400);
-
     echo json_encode([
         "success" => false,
-        "message" => "id and user_id are required"
+        "message" => "Valid id and user_id are required"
     ]);
-
     exit;
 }
 
 try {
 
     /* =========================================
-       DELETE ONLY IF OWNER
+       HARD DELETE (PERMANENT REMOVE)
     ========================================= */
     $stmt = $conn->prepare("
         DELETE FROM outage_reports
@@ -60,19 +54,20 @@ try {
         ":user_id" => $user_id
     ]);
 
-    if ($stmt->rowCount() === 0) {
+    $affected = $stmt->rowCount();
 
+    if ($affected === 0) {
         echo json_encode([
             "success" => false,
             "message" => "No record found or unauthorized"
         ]);
-
         exit;
     }
 
     echo json_encode([
         "success" => true,
-        "message" => "Report deleted successfully"
+        "message" => "Report permanently deleted",
+        "deleted_rows" => $affected
     ]);
 
 } catch (PDOException $e) {
@@ -81,6 +76,7 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => "Database error",
+        "error" => $e->getMessage()
     ]);
 }

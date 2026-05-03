@@ -3,15 +3,11 @@ CREATE DATABASE powerguide;
 USE powerguide;
 
 CREATE TABLE outage_reports (
-
     id INT AUTO_INCREMENT PRIMARY KEY,
-
     user_id INT NOT NULL,
 
     location_name VARCHAR(255) NOT NULL,
-
     latitude DECIMAL(10,8),
-
     longitude DECIMAL(11,8),
 
     category ENUM(
@@ -25,61 +21,37 @@ CREATE TABLE outage_reports (
         'unknown_issue'
     ) DEFAULT 'power_outage',
 
-    severity ENUM(
-        'minor',
-        'moderate',
-        'critical'
-    ) DEFAULT 'moderate',
+    severity ENUM('minor','moderate','critical') DEFAULT 'moderate',
 
     description TEXT,
-
     image_proof TEXT NULL,
-
     affected_houses INT DEFAULT 1,
 
-    is_active ENUM(
-        'yes',
-        'no',
-        'unknown'
-    ) DEFAULT 'yes',
+    is_active ENUM('yes','no','unknown') DEFAULT 'yes',
 
-    hazard_type ENUM(
-        'none',
-        'smoke',
-        'sparks',
-        'fire',
-        'fallen_wire',
-        'explosion_sound'
-    ) DEFAULT 'none',
+    hazard_type ENUM('none','smoke','sparks','fire','fallen_wire','explosion_sound') DEFAULT 'none',
 
     started_at DATETIME NULL,
 
-    status ENUM(
-        'unverified',
-        'under_review',
-        'verified',
-        'resolved',
-        'fake_report'
-    ) DEFAULT 'unverified',
+    status ENUM('unverified','under_review','verified','resolved','fake_report') DEFAULT 'unverified',
 
     verified_by INT NULL,
 
+    is_deleted TINYINT(1) DEFAULT 0,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_outage_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-
-    CONSTRAINT fk_outage_verified_by
-        FOREIGN KEY (verified_by)
-        REFERENCES users(id)
-        ON DELETE SET NULL
-
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (verified_by) REFERENCES users(id) ON DELETE SET NULL
 );
+
+CREATE INDEX idx_user_id ON outage_reports(user_id);
+CREATE INDEX idx_status ON outage_reports(status);
+CREATE INDEX idx_location ON outage_reports(latitude, longitude);
+CREATE INDEX idx_status_category ON outage_reports(status, category);
+
+
 
 CREATE TABLE power_stations (
 
