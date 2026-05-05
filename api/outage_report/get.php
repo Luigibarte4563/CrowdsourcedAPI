@@ -1,21 +1,37 @@
 <?php
 
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=UTF-8");
+
+session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
 
 $conn = getConnection();
 
 /* =========================================
+   STRICT SESSION CHECK (SECURITY FIX)
+========================================= */
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (no session)"
+    ]);
+    exit;
+}
+
+/* =========================================
    OPTIONAL QUERY PARAMETERS
 ========================================= */
-$user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : null;
 $status  = $_GET['status'] ?? null;
 $category = $_GET['category'] ?? null;
 $active   = $_GET['is_active'] ?? null;
 
 /* =========================================
-   BASE QUERY (UPDATED FOR NEW DB)
+   BASE QUERY (USER-LOCKED DATA)
 ========================================= */
 $sql = "
     SELECT 
@@ -37,19 +53,17 @@ $sql = "
         created_at,
         updated_at
     FROM outage_reports
-    WHERE is_deleted = 0
+    WHERE user_id = :user_id
+      AND is_deleted = 0
 ";
 
-$params = [];
+$params = [
+    ":user_id" => $user_id
+];
 
 /* =========================================
    FILTERS (OPTIONAL)
 ========================================= */
-
-if ($user_id) {
-    $sql .= " AND user_id = :user_id";
-    $params[':user_id'] = $user_id;
-}
 
 if ($status) {
     $sql .= " AND status = :status";
@@ -61,7 +75,7 @@ if ($category) {
     $params[':category'] = $category;
 }
 
-if ($active) {
+if ($active !== null) {
     $sql .= " AND is_active = :is_active";
     $params[':is_active'] = $active;
 }
@@ -74,7 +88,6 @@ $sql .= " ORDER BY created_at DESC";
 /* =========================================
    EXECUTE
 ========================================= */
-
 try {
 
     $stmt = $conn->prepare($sql);
@@ -84,6 +97,7 @@ try {
 
     echo json_encode([
         "success" => true,
+        "message" => "Reports fetched successfully",
         "count" => count($reports),
         "data" => $reports
     ]);
@@ -94,7 +108,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error",
-        "error" => $e->getMessage()
+        "message" => "Database error"
     ]);
 }

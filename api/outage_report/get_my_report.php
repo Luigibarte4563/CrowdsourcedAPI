@@ -2,38 +2,30 @@
 
 header("Content-Type: application/json; charset=UTF-8");
 
-require_once __DIR__ . '/../../config/db_connect.php';
-
 session_start();
 
-/* =========================================
-   DB CONNECTION
-========================================= */
+require_once __DIR__ . '/../../config/db_connect.php';
+
 $conn = getConnection();
 
 /* =========================================
-   STRICT SESSION CHECK
+   GET USER FROM SESSION (LIKE YOUR REFERENCE)
 ========================================= */
-if (
-    !isset($_SESSION['user']) ||
-    !isset($_SESSION['user']['id']) ||
-    empty($_SESSION['user']['id'])
-) {
-    http_response_code(401);
+$user_id = $_SESSION['user']['id'] ?? null;
 
+if (!$user_id) {
+    http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized: Please login first"
+        "message" => "Unauthorized (no session)"
     ]);
     exit;
 }
 
-$user_id = (int) $_SESSION['user']['id'];
-
 try {
 
     /* =========================================
-       FETCH ONLY CURRENT USER REPORTS
+       FETCH ONLY USER REPORTS (SAFE + FILTERED)
     ========================================= */
     $stmt = $conn->prepare("
         SELECT 
@@ -60,13 +52,18 @@ try {
         ORDER BY created_at DESC
     ");
 
-    $stmt->bindParam(":user_id", $user_id, PDO::PARAM_INT);
-    $stmt->execute();
+    $stmt->execute([
+        ":user_id" => $user_id
+    ]);
 
     $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    /* =========================================
+       RESPONSE (CONSISTENT STYLE)
+    ========================================= */
     echo json_encode([
         "success" => true,
+        "message" => "Reports fetched successfully",
         "count" => count($reports),
         "data" => $reports
     ]);
@@ -77,7 +74,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error",
-        "error" => $e->getMessage() // remove in production
+        "message" => "Database error"
     ]);
 }
