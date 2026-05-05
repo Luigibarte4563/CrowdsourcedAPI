@@ -2,40 +2,70 @@
 
 header("Content-Type: application/json");
 
-require_once "../../config/db_connect.php";
-
-$conn = getConnection();
 session_start();
 
-$data = json_decode(file_get_contents("php://input"), true);
+require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../services/get_coordinates.php';
 
-$id = $data['id'] ?? null;
+$conn = getConnection();
 
-if (!$id) {
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Station ID required"
+        "message" => "Unauthorized"
     ]);
     exit;
 }
 
-/* =========================
-   FIELDS
-========================= */
-$station_name = $data['station_name'] ?? null;
-$location_name = $data['location_name'] ?? null;
-$latitude = $data['latitude'] ?? null;
-$longitude = $data['longitude'] ?? null;
-$station_type = $data['station_type'] ?? null;
-$access_type = $data['access_type'] ?? null;
-$availability_status = $data['availability_status'] ?? null;
-$operating_hours = $data['operating_hours'] ?? null;
-$charging_type = $data['charging_type'] ?? null;
-$description = $data['description'] ?? null;
+$data = json_decode(file_get_contents("php://input"), true);
 
-/* =========================
-   BUILD UPDATE
-========================= */
+$id = $data["id"] ?? null;
+
+if (!$id) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "ID required"
+    ]);
+    exit;
+}
+
+/* GET EXISTING */
+$stmt = $conn->prepare("SELECT * FROM power_stations WHERE id = :id");
+$stmt->execute([":id" => $id]);
+$station = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$station) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Not found"
+    ]);
+    exit;
+}
+
+/* UPDATE FIELDS */
+$station_name = $data["station_name"] ?? $station["station_name"];
+$location_name = $data["location_name"] ?? $station["location_name"];
+
+if ($location_name !== $station["location_name"]) {
+    $geo = getCoordinates($location_name);
+    $latitude = $geo["latitude"];
+    $longitude = $geo["longitude"];
+} else {
+    $latitude = $station["latitude"];
+    $longitude = $station["longitude"];
+}
+
+$station_type = $data["station_type"] ?? $station["station_type"];
+$access_type = $data["access_type"] ?? $station["access_type"];
+$availability_status = $data["availability_status"] ?? $station["availability_status"];
+$operating_hours = $data["operating_hours"] ?? $station["operating_hours"];
+$charging_type = $data["charging_type"] ?? $station["charging_type"];
+$description = $data["description"] ?? $station["description"];
+
 try {
 
     $stmt = $conn->prepare("
@@ -49,12 +79,12 @@ try {
             availability_status = :availability_status,
             operating_hours = :operating_hours,
             charging_type = :charging_type,
-            description = :description,
-            updated_at = NOW()
+            description = :description
         WHERE id = :id
     ");
 
     $stmt->execute([
+        ":id" => $id,
         ":station_name" => $station_name,
         ":location_name" => $location_name,
         ":latitude" => $latitude,
@@ -64,17 +94,17 @@ try {
         ":availability_status" => $availability_status,
         ":operating_hours" => $operating_hours,
         ":charging_type" => $charging_type,
-        ":description" => $description,
-        ":id" => $id
+        ":description" => $description
     ]);
 
     echo json_encode([
         "success" => true,
-        "message" => "Station updated successfully"
+        "message" => "Updated successfully"
     ]);
 
 } catch (PDOException $e) {
 
+    http_response_code(500);
     echo json_encode([
         "success" => false,
         "message" => "Database error"

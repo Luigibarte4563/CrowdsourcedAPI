@@ -2,98 +2,80 @@
 
 header("Content-Type: application/json");
 
-require_once "../../config/db_connect.php";
-
-$conn = getConnection();
 session_start();
 
-/* =========================================
-   ONLY JSON INPUT (STRICT)
-========================================= */
-$raw = file_get_contents("php://input");
-$data = json_decode($raw, true);
+require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../services/get_coordinates.php';
+
+$conn = getConnection();
 
 /* =========================================
-   CHECK JSON VALIDITY
+   AUTH CHECK
 ========================================= */
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized"
+    ]);
+    exit;
+}
+
+/* =========================================
+   INPUT
+========================================= */
+$data = json_decode(file_get_contents("php://input"), true);
+
 if (!$data) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Invalid JSON body"
+        "message" => "Invalid JSON"
     ]);
     exit;
 }
 
-/* =========================================
-   AUTH CHECK (SESSION)
-========================================= */
-$created_by = $_SESSION['user_id'] ?? null;
-
-if (!$created_by) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized: Please login first"
-    ]);
-    exit;
-}
-
-/* =========================================
-   INPUTS
-========================================= */
-$station_name  = trim($data["station_name"] ?? "");
+$station_name = trim($data["station_name"] ?? "");
 $location_name = trim($data["location_name"] ?? "");
 
-$latitude  = $data["latitude"] ?? null;
-$longitude = $data["longitude"] ?? null;
-
-$station_type = $data["station_type"] ?? "power_station";
-$access_type  = $data["access_type"] ?? "free";
-$availability_status = $data["availability_status"] ?? "available";
-
-$operating_hours = $data["operating_hours"] ?? null;
-$charging_type   = $data["charging_type"] ?? null;
-$description     = $data["description"] ?? null;
-$image           = $data["image"] ?? null;
-
-/* =========================================
-   VALIDATION
-========================================= */
 if ($station_name === "" || $location_name === "") {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "station_name and location_name are required"
+        "message" => "station_name and location_name required"
     ]);
     exit;
 }
 
 /* =========================================
-   ENUM VALIDATION
+   GEOCODING
 ========================================= */
-$allowedType = [
-    'power_station',
-    'solar_station',
-    'charging_station',
-    'generator_station'
-];
+$geo = getCoordinates($location_name);
 
-$allowedAccess = ['free', 'paid'];
-
-$allowedStatus = ['available', 'busy', 'offline', 'maintenance'];
-
-if (!in_array($station_type, $allowedType)) {
-    $station_type = "power_station";
+if (!$geo["success"]) {
+    http_response_code(404);
+    echo json_encode([
+        "success" => false,
+        "message" => $geo["message"]
+    ]);
+    exit;
 }
 
-if (!in_array($access_type, $allowedAccess)) {
-    $access_type = "free";
-}
+$latitude = $geo["latitude"];
+$longitude = $geo["longitude"];
 
-if (!in_array($availability_status, $allowedStatus)) {
-    $availability_status = "available";
-}
+/* =========================================
+   OPTIONAL FIELDS
+========================================= */
+$station_type = $data["station_type"] ?? "power_station";
+$access_type = $data["access_type"] ?? "free";
+$availability_status = $data["availability_status"] ?? "available";
+$operating_hours = $data["operating_hours"] ?? null;
+$charging_type = $data["charging_type"] ?? null;
+$description = $data["description"] ?? null;
+$image = $data["image"] ?? null;
 
 /* =========================================
    INSERT
@@ -131,7 +113,7 @@ try {
     ");
 
     $stmt->execute([
-        ":created_by" => $created_by,
+        ":created_by" => $user_id,
         ":station_name" => $station_name,
         ":location_name" => $location_name,
         ":latitude" => $latitude,
@@ -147,13 +129,12 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Power station created successfully"
+        "message" => "Power station created"
     ]);
 
 } catch (PDOException $e) {
 
     http_response_code(500);
-
     echo json_encode([
         "success" => false,
         "message" => "Database error"
