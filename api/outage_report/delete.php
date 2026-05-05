@@ -2,9 +2,25 @@
 
 header("Content-Type: application/json");
 
+session_start();
+
 require_once __DIR__ . '/../../config/db_connect.php';
 
 $conn = getConnection();
+
+/* =========================================
+   GET USER FROM SESSION (IMPORTANT FIX)
+========================================= */
+$user_id = $_SESSION['user']['id'] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized"
+    ]);
+    exit;
+}
 
 /* =========================================
    INPUT JSON
@@ -24,25 +40,18 @@ if (!$data) {
    REQUIRED INPUT
 ========================================= */
 $id = (int)($data["id"] ?? 0);
-$user_id = (int)($data["user_id"] ?? 0);
 
-/* =========================================
-   VALIDATION
-========================================= */
-if ($id <= 0 || $user_id <= 0) {
+if ($id <= 0) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Valid id and user_id are required"
+        "message" => "Valid id required"
     ]);
     exit;
 }
 
 try {
 
-    /* =========================================
-       HARD DELETE (PERMANENT REMOVE)
-    ========================================= */
     $stmt = $conn->prepare("
         DELETE FROM outage_reports
         WHERE id = :id
@@ -54,9 +63,7 @@ try {
         ":user_id" => $user_id
     ]);
 
-    $affected = $stmt->rowCount();
-
-    if ($affected === 0) {
+    if ($stmt->rowCount() === 0) {
         echo json_encode([
             "success" => false,
             "message" => "No record found or unauthorized"
@@ -66,17 +73,14 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Report permanently deleted",
-        "deleted_rows" => $affected
+        "message" => "Report deleted successfully"
     ]);
 
 } catch (PDOException $e) {
 
     http_response_code(500);
-
     echo json_encode([
         "success" => false,
-        "message" => "Database error",
-        "error" => $e->getMessage()
+        "message" => "Database error"
     ]);
 }
