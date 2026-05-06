@@ -1,7 +1,6 @@
 <?php
 
 header("Content-Type: application/json; charset=UTF-8");
-
 session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
@@ -9,7 +8,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 $conn = getConnection();
 
 /* =========================================
-   GET USER FROM SESSION
+   AUTH CHECK
 ========================================= */
 $user_id = $_SESSION['user']['id'] ?? null;
 
@@ -22,10 +21,18 @@ if (!$user_id) {
     exit;
 }
 
+/* force correct type */
+$user_id = (int) $user_id;
+
 try {
 
     /* =========================================
-       FETCH ONLY USER CREATED STATIONS
+       DEBUG (optional - remove later)
+    ========================================= */
+    // error_log("Fetching stations for user_id: " . $user_id);
+
+    /* =========================================
+       FETCH USER STATIONS
     ========================================= */
     $stmt = $conn->prepare("
         SELECT 
@@ -49,9 +56,8 @@ try {
         ORDER BY created_at DESC
     ");
 
-    $stmt->execute([
-        ":user_id" => $user_id
-    ]);
+    $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+    $stmt->execute();
 
     $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -61,6 +67,7 @@ try {
     echo json_encode([
         "success" => true,
         "message" => "My stations fetched successfully",
+        "user_id" => $user_id,
         "count" => count($stations),
         "data" => $stations
     ]);
@@ -71,6 +78,7 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => "Database error",
+        "error" => $e->getMessage() // remove in production
     ]);
 }

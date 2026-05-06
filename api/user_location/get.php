@@ -21,22 +21,19 @@ if (!$user_id) {
 try {
 
     $stmt = $conn->prepare("
-        SELECT location_name
+        SELECT location_name, latitude, longitude, updated_at
         FROM users
         WHERE id = :user_id
         LIMIT 1
     ");
 
-    $stmt->execute([
-        ":user_id" => $user_id
-    ]);
-
+    $stmt->execute([":user_id" => $user_id]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$user || !$user["location_name"]) {
+    if (!$user) {
         echo json_encode([
             "success" => false,
-            "message" => "No location found"
+            "message" => "User not found"
         ]);
         exit;
     }
@@ -44,7 +41,10 @@ try {
     echo json_encode([
         "success" => true,
         "data" => [
-            "location_name" => $user["location_name"]
+            "location_name" => $user["location_name"],
+            "latitude" => $user["latitude"],
+            "longitude" => $user["longitude"],
+            "updated_at" => $user["updated_at"]
         ]
     ]);
 
