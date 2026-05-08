@@ -2,22 +2,32 @@
 
 header("Content-Type: application/json; charset=UTF-8");
 
-session_start();
-
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
 /* =========================================
-   GET USER FROM SESSION (LIKE YOUR REFERENCE)
+   JWT AUTH (REPLACES SESSION)
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (no session)"
+        "message" => "Invalid user token"
     ]);
     exit;
 }
@@ -25,7 +35,7 @@ if (!$user_id) {
 try {
 
     /* =========================================
-       FETCH ONLY USER REPORTS (SAFE + FILTERED)
+       FETCH USER REPORTS
     ========================================= */
     $stmt = $conn->prepare("
         SELECT 
@@ -59,7 +69,7 @@ try {
     $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     /* =========================================
-       RESPONSE (CONSISTENT STYLE)
+       RESPONSE
     ========================================= */
     echo json_encode([
         "success" => true,

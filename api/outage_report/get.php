@@ -2,23 +2,22 @@
 
 header("Content-Type: application/json; charset=UTF-8");
 
-session_start();
-
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
 /* =========================================
-   STRICT SESSION CHECK (SECURITY FIX)
+   JWT AUTH (STILL REQUIRED)
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
 
-if (!$user_id) {
+if (!$user) {
     http_response_code(401);
 
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (no session)"
+        "message" => "Unauthorized (invalid JWT)"
     ]);
     exit;
 }
@@ -26,12 +25,12 @@ if (!$user_id) {
 /* =========================================
    OPTIONAL QUERY PARAMETERS
 ========================================= */
-$status  = $_GET['status'] ?? null;
+$status   = $_GET['status'] ?? null;
 $category = $_GET['category'] ?? null;
 $active   = $_GET['is_active'] ?? null;
 
 /* =========================================
-   BASE QUERY (USER-LOCKED DATA)
+   BASE QUERY (NO USER FILTER = ALL REPORTS)
 ========================================= */
 $sql = "
     SELECT 
@@ -53,18 +52,14 @@ $sql = "
         created_at,
         updated_at
     FROM outage_reports
-    WHERE user_id = :user_id
-      AND is_deleted = 0
+    WHERE is_deleted = 0
 ";
 
-$params = [
-    ":user_id" => $user_id
-];
+$params = [];
 
 /* =========================================
-   FILTERS (OPTIONAL)
+   OPTIONAL FILTERS
 ========================================= */
-
 if ($status) {
     $sql .= " AND status = :status";
     $params[':status'] = $status;
@@ -81,7 +76,7 @@ if ($active !== null) {
 }
 
 /* =========================================
-   ORDER (LATEST FIRST)
+   ORDER BY LATEST
 ========================================= */
 $sql .= " ORDER BY created_at DESC";
 
@@ -97,7 +92,7 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Reports fetched successfully",
+        "message" => "All reports fetched successfully",
         "count" => count($reports),
         "data" => $reports
     ]);

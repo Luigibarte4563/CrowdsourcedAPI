@@ -1,23 +1,40 @@
 <?php
 
 header("Content-Type: application/json");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
-$user_id = $_SESSION['user']['id'] ?? null;
+/* =========================================
+   JWT AUTH (REPLACES SESSION)
+========================================= */
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized"
+        "message" => "Invalid token user"
     ]);
     exit;
 }
 
+/* =========================================
+   FETCH USER LOCATION
+========================================= */
 try {
 
     $stmt = $conn->prepare("
@@ -27,10 +44,14 @@ try {
         LIMIT 1
     ");
 
-    $stmt->execute([":user_id" => $user_id]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([
+        ":user_id" => $user_id
+    ]);
 
-    if (!$user) {
+    $userData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$userData) {
+        http_response_code(404);
         echo json_encode([
             "success" => false,
             "message" => "User not found"
@@ -41,10 +62,10 @@ try {
     echo json_encode([
         "success" => true,
         "data" => [
-            "location_name" => $user["location_name"],
-            "latitude" => $user["latitude"],
-            "longitude" => $user["longitude"],
-            "updated_at" => $user["updated_at"]
+            "location_name" => $userData["location_name"],
+            "latitude" => $userData["latitude"],
+            "longitude" => $userData["longitude"],
+            "updated_at" => $userData["updated_at"]
         ]
     ]);
 

@@ -2,25 +2,50 @@
 
 header("Content-Type: application/json");
 
-session_start();
-
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
 
-$user_id = $_SESSION['user']['id'] ?? null;
+/* =========================================
+   JWT AUTH (REPLACES SESSION)
+========================================= */
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized"
+        "message" => "Invalid user token"
     ]);
     exit;
 }
 
+/* =========================================
+   INPUT
+========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
+
+if (json_last_error() !== JSON_ERROR_NONE || !$data) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid JSON"
+    ]);
+    exit;
+}
 
 $id = $data["id"] ?? null;
 
@@ -33,27 +58,53 @@ if (!$id) {
     exit;
 }
 
-/* GET EXISTING */
-$stmt = $conn->prepare("SELECT * FROM power_stations WHERE id = :id");
-$stmt->execute([":id" => $id]);
+/* =========================================
+   GET EXISTING (SECURITY FIX: USER OWNERSHIP)
+========================================= */
+$stmt = $conn->prepare("
+    SELECT * FROM power_stations
+    WHERE id = :id AND created_by = :user_id
+    LIMIT 1
+");
+
+$stmt->execute([
+    ":id" => $id,
+    ":user_id" => $user_id
+]);
+
 $station = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$station) {
+    http_response_code(404);
     echo json_encode([
         "success" => false,
-        "message" => "Not found"
+        "message" => "Not found or unauthorized"
     ]);
     exit;
 }
 
-/* UPDATE FIELDS */
+/* =========================================
+   UPDATE FIELDS (SAFE FALLBACKS)
+========================================= */
 $station_name = $data["station_name"] ?? $station["station_name"];
 $location_name = $data["location_name"] ?? $station["location_name"];
 
 if ($location_name !== $station["location_name"]) {
+
     $geo = getCoordinates($location_name);
+
+    if (!$geo["success"]) {
+        http_response_code(400);
+        echo json_encode([
+            "success" => false,
+            "message" => $geo["message"]
+        ]);
+        exit;
+    }
+
     $latitude = $geo["latitude"];
     $longitude = $geo["longitude"];
+
 } else {
     $latitude = $station["latitude"];
     $longitude = $station["longitude"];
@@ -66,6 +117,9 @@ $operating_hours = $data["operating_hours"] ?? $station["operating_hours"];
 $charging_type = $data["charging_type"] ?? $station["charging_type"];
 $description = $data["description"] ?? $station["description"];
 
+/* =========================================
+   UPDATE QUERY (JWT SAFE)
+========================================= */
 try {
 
     $stmt = $conn->prepare("
@@ -81,10 +135,12 @@ try {
             charging_type = :charging_type,
             description = :description
         WHERE id = :id
+          AND created_by = :user_id
     ");
 
     $stmt->execute([
         ":id" => $id,
+        ":user_id" => $user_id,
         ":station_name" => $station_name,
         ":location_name" => $location_name,
         ":latitude" => $latitude,

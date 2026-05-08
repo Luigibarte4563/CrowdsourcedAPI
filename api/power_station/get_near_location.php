@@ -2,21 +2,32 @@
 
 header("Content-Type: application/json; charset=UTF-8");
 
-session_start();
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
 /* =========================================
-   AUTH CHECK
+   JWT AUTH
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized"
+        "message" => "Invalid token payload"
     ]);
     exit;
 }
@@ -34,7 +45,7 @@ try {
     ");
 
     $stmt->execute([":id" => $user_id]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $userData = $stmt->fetch(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {
 
@@ -52,7 +63,7 @@ try {
 $radius = isset($_GET['radius']) ? (int) $_GET['radius'] : 3000;
 
 /* =========================================
-   FUNCTION: FETCH ALL AVAILABLE
+   FALLBACK FUNCTION
 ========================================= */
 function fetchAllStations($conn) {
 
@@ -89,16 +100,16 @@ try {
     $stations = [];
 
     /* =========================================
-       IF USER HAS LOCATION → TRY NEARBY
+       NEARBY SEARCH
     ========================================= */
     if (
-        $user &&
-        $user['latitude'] !== null &&
-        $user['longitude'] !== null
+        $userData &&
+        $userData['latitude'] !== null &&
+        $userData['longitude'] !== null
     ) {
 
-        $lat = (float) $user['latitude'];
-        $lng = (float) $user['longitude'];
+        $lat = (float) $userData['latitude'];
+        $lng = (float) $userData['longitude'];
 
         $stmt = $conn->prepare("
             SELECT 
@@ -126,9 +137,8 @@ try {
                 ) AS distance
 
             FROM power_stations
-
+            WHERE availability_status = 'available'
             HAVING distance <= :radius
-
             ORDER BY distance ASC
         ");
 
@@ -142,7 +152,7 @@ try {
     }
 
     /* =========================================
-       FALLBACK: NO NEARBY FOUND
+       FALLBACK
     ========================================= */
     if (empty($stations)) {
         $stations = fetchAllStations($conn);
@@ -153,7 +163,7 @@ try {
         "message" => empty($stations)
             ? "No stations found"
             : "Stations loaded successfully",
-        "fallback" => empty($user) || empty($user['latitude']),
+        "fallback" => empty($userData) || empty($userData['latitude']),
         "radius" => $radius,
         "count" => count($stations),
         "data" => $stations

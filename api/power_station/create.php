@@ -2,23 +2,33 @@
 
 header("Content-Type: application/json");
 
-session_start();
-
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
 
 /* =========================================
-   AUTH CHECK
+   JWT AUTH (REPLACES SESSION)
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized"
+        "message" => "Invalid user token"
     ]);
     exit;
 }
@@ -28,7 +38,7 @@ if (!$user_id) {
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (!$data) {
+if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -129,12 +139,13 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Power station created"
+        "message" => "Power station created successfully"
     ]);
 
 } catch (PDOException $e) {
 
     http_response_code(500);
+
     echo json_encode([
         "success" => false,
         "message" => "Database error"

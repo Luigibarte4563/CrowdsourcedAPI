@@ -1,22 +1,33 @@
 <?php
 
 header("Content-Type: application/json; charset=UTF-8");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
 /* =========================================
-   AUTH CHECK
+   JWT AUTH (REPLACES SESSION)
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (no session)"
+        "message" => "Invalid user token"
     ]);
     exit;
 }
@@ -25,11 +36,6 @@ if (!$user_id) {
 $user_id = (int) $user_id;
 
 try {
-
-    /* =========================================
-       DEBUG (optional - remove later)
-    ========================================= */
-    // error_log("Fetching stations for user_id: " . $user_id);
 
     /* =========================================
        FETCH USER STATIONS
@@ -78,7 +84,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error",
-        "error" => $e->getMessage() // remove in production
+        "message" => "Database error"
     ]);
 }

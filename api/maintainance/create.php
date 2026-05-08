@@ -1,23 +1,43 @@
 <?php
 
 header("Content-Type: application/json");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
-require_once __DIR__ . '../../services/get_coordinates.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 /* =========================================
-   AUTH CHECK
+   JWT AUTH (REPLACES SESSION)
 ========================================= */
-$electric_company_id = $_SESSION['user']['electric_company_id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+if (($user['role'] ?? null) !== 'electric_company') {
+    http_response_code(403);
+    echo json_encode([
+        "success" => false,
+        "message" => "Forbidden: insufficient permissions"
+    ]);
+    exit;
+}
+
+$electric_company_id = $user['electric_company_id'] ?? $user['id'] ?? null;
 
 if (!$electric_company_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (no electric company)"
+        "message" => "Invalid token data"
     ]);
     exit;
 }
@@ -27,7 +47,7 @@ if (!$electric_company_id) {
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (!$data) {
+if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -36,182 +56,124 @@ if (!$data) {
     exit;
 }
 
-/* =========================================
-   REQUIRED FIELDS
-========================================= */
-$affected_area    = trim($data["affected_area"] ?? "");
 $maintenance_date = $data["maintenance_date"] ?? null;
-$start_time       = $data["start_time"] ?? null;
-$end_time         = $data["end_time"] ?? null;
+$start_time = $data["start_time"] ?? null;
+$end_time = $data["end_time"] ?? null;
+$description = $data["description"] ?? "";
+$barangays = $data["barangays"] ?? [];
 
-if ($affected_area === "" || !$maintenance_date || !$start_time || !$end_time) {
+/* =========================================
+   VALIDATION
+========================================= */
+if (!$maintenance_date || !$start_time || !$end_time) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "affected_area, maintenance_date, start_time, end_time are required"
+        "message" => "Missing required fields"
     ]);
     exit;
 }
 
-/* =========================================
-   GEOCODING
-========================================= */
-$geo = getCoordinates($affected_area);
-
-if (!$geo["success"]) {
-    http_response_code(404);
+if (!is_array($barangays) || count($barangays) === 0) {
+    http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Cannot find location coordinates for: " . $affected_area
+        "message" => "No barangays selected"
     ]);
     exit;
 }
 
-$latitude  = $geo["latitude"];
-$longitude = $geo["longitude"];
-
 /* =========================================
-   OPTIONAL FIELDS
+   BARANGAY MAP
 ========================================= */
-$radius       = $data["radius"] ?? 2000;
-$description  = $data["description"] ?? "";
-$estimated_restoration_time = $data["estimated_restoration_time"] ?? null;
+$barangay_map = [
+    "Bonuan Gueset" => [16.0585, 120.3345],
+    "Bonuan Boquig" => [16.0600, 120.3200],
+    "Bonuan Binloc" => [16.0620, 120.3100],
+    "Lucao" => [16.0435, 120.3310],
+    "Tapuac" => [16.0460, 120.3450],
+    "Tambac" => [16.0520, 120.3400],
+    "Pantal" => [16.0468, 120.3330],
+    "Bacayao Norte" => [16.0300, 120.3200],
+    "Bacayao Sur" => [16.0250, 120.3250],
+    "Malued" => [16.0400, 120.3200],
+    "Mayombo" => [16.0480, 120.3100],
+    "Mangin" => [16.0550, 120.3500],
+    "Tebeng" => [16.0600, 120.3450],
+    "Pogo Chico" => [16.0510, 120.3600],
+    "Pogo Grande" => [16.0550, 120.3650],
+    "Herrero" => [16.0450, 120.3350],
+    "Poblacion Centro" => [16.0430, 120.3335],
+    "Poblacion Oeste" => [16.0410, 120.3300],
+    "Poblacion Este" => [16.0440, 120.3360]
+];
 
-/* =========================================
-   HELPER: DISTANCE (Haversine)
-========================================= */
-function distance($lat1, $lon1, $lat2, $lon2) {
-    $earth = 6371000;
+$first = $barangays[0] ?? null;
 
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-
-    $a = sin($dLat/2) * sin($dLat/2) +
-         cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-         sin($dLon/2) * sin($dLon/2);
-
-    $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-
-    return $earth * $c;
+if (!$first || !isset($barangay_map[$first])) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid barangay"
+    ]);
+    exit;
 }
 
+[$latitude, $longitude] = $barangay_map[$first];
+
 /* =========================================
-   START TRANSACTION
+   INSERT
 ========================================= */
 try {
 
-    $conn->beginTransaction();
-
-    /* =========================================
-       1. INSERT MAINTENANCE
-    ========================================= */
     $stmt = $conn->prepare("
         INSERT INTO maintenance_schedules (
             electric_company_id,
             affected_area,
             latitude,
             longitude,
-            radius,
             maintenance_date,
             start_time,
             end_time,
             description,
-            estimated_restoration_time
+            affected_barangays
         )
         VALUES (
             :electric_company_id,
             :affected_area,
             :latitude,
             :longitude,
-            :radius,
             :maintenance_date,
             :start_time,
             :end_time,
             :description,
-            :estimated_restoration_time
+            :affected_barangays
         )
     ");
 
     $stmt->execute([
         ":electric_company_id" => $electric_company_id,
-        ":affected_area" => $affected_area,
+        ":affected_area" => $first,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
-        ":radius" => $radius,
         ":maintenance_date" => $maintenance_date,
         ":start_time" => $start_time,
         ":end_time" => $end_time,
         ":description" => $description,
-        ":estimated_restoration_time" => $estimated_restoration_time
+        ":affected_barangays" => json_encode($barangays)
     ]);
 
-    $maintenance_id = $conn->lastInsertId();
-
-    /* =========================================
-       2. GET USERS
-    ========================================= */
-    $stmt = $conn->prepare("
-        SELECT id, name, latitude, longitude
-        FROM users
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-    ");
-
-    $stmt->execute();
-    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    /* =========================================
-       3. BUILD NOTIFICATIONS
-    ========================================= */
-    $notifStmt = $conn->prepare("
-        INSERT INTO notifications (user_id, title, message, type)
-        VALUES (:user_id, :title, :message, 'maintenance')
-    ");
-
-    $count = 0;
-
-    foreach ($users as $u) {
-
-        $dist = distance(
-            $latitude,
-            $longitude,
-            $u["latitude"],
-            $u["longitude"]
-        );
-
-        if ($dist <= $radius) {
-
-            $notifStmt->execute([
-                ":user_id" => $u["id"],
-                ":title"   => "Scheduled Maintenance",
-                ":message" => "Power interruption at {$affected_area}"
-            ]);
-
-            $count++;
-        }
-    }
-
-    $conn->commit();
-
-    /* =========================================
-       RESPONSE
-    ========================================= */
     echo json_encode([
         "success" => true,
-        "message" => "Maintenance created and notifications sent",
-        "maintenance_id" => $maintenance_id,
-        "notifications_sent" => $count,
-        "latitude" => $latitude,
-        "longitude" => $longitude
+        "message" => "Maintenance created successfully"
     ]);
 
-} catch (PDOException $e) {
-
-    $conn->rollBack();
+} catch (Exception $e) {
 
     http_response_code(500);
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => "Server error"
     ]);
 }

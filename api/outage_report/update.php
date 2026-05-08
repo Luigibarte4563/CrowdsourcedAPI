@@ -2,23 +2,33 @@
 
 header("Content-Type: application/json");
 
-session_start();
-
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
 
 /* =========================================
-   CHECK SESSION
+   JWT AUTH (REPLACES SESSION)
 ========================================= */
-$user_id = $_SESSION['user']['id'] ?? null;
+$user = getUserFromJWT();
+
+if (!$user) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
+    exit;
+}
+
+$user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized"
+        "message" => "Invalid user token"
     ]);
     exit;
 }
@@ -28,7 +38,7 @@ if (!$user_id) {
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (!$data) {
+if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -91,7 +101,7 @@ $hazard_type     = $data["hazard_type"] ?? $report["hazard_type"];
 $started_at      = $data["started_at"] ?? $report["started_at"];
 
 /* =========================================
-   GEO UPDATE (ONLY IF LOCATION CHANGED)
+   GEO UPDATE IF CHANGED
 ========================================= */
 if ($location_name !== $report["location_name"]) {
 
@@ -110,17 +120,15 @@ if ($location_name !== $report["location_name"]) {
     $longitude = $geo["longitude"];
 
 } else {
-
     $latitude  = $report["latitude"];
     $longitude = $report["longitude"];
 }
 
 /* =========================================
-   🔒 DAGUPAN VALIDATION (REQUIRED)
+   DISTANCE FUNCTION
 ========================================= */
-
-/* Haversine */
 function haversineDistance($lat1, $lon1, $lat2, $lon2) {
+
     $earthRadius = 6371000;
 
     $dLat = deg2rad($lat2 - $lat1);
@@ -135,7 +143,9 @@ function haversineDistance($lat1, $lon1, $lat2, $lon2) {
     return $earthRadius * $c;
 }
 
-/* Barangays */
+/* =========================================
+   BARANGAY LIST
+========================================= */
 $barangays = [
     ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
     ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
@@ -146,10 +156,13 @@ $barangays = [
     ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>1500],
 ];
 
-/* Get barangay */
+/* =========================================
+   GET BARANGAY
+========================================= */
 function getBarangay($lat, $lng, $barangays) {
 
     foreach ($barangays as $b) {
+
         $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
 
         if ($distance <= $b["radius"]) {
@@ -162,7 +175,7 @@ function getBarangay($lat, $lng, $barangays) {
 
 $barangay = getBarangay($latitude, $longitude, $barangays);
 
-/* ❌ BLOCK IF OUTSIDE DAGUPAN */
+/* BLOCK OUTSIDE AREA */
 if (!$barangay) {
     http_response_code(403);
     echo json_encode([
@@ -207,6 +220,9 @@ $success = $stmt->execute([
     ":status" => $status
 ]);
 
+/* =========================================
+   RESPONSE
+========================================= */
 echo json_encode([
     "success" => $success,
     "message" => $success ? "Report updated successfully" : "Update failed",
