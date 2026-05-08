@@ -1,57 +1,121 @@
 <?php
 
 header("Content-Type: application/json");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-$user_id = $_SESSION['user']['id'] ?? null;
+/* =========================================
+   JWT AUTH
+========================================= */
+$user = getUserFromJWT();
 
-if (!$user_id) {
+if (!$user) {
     http_response_code(401);
-    echo json_encode(["success" => false, "message" => "Unauthorized"]);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid token)"
+    ]);
     exit;
 }
 
+$user_id = $user["id"] ?? null;
+$role = $user["role"] ?? null;
+
+if (!$user_id) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid token data"
+    ]);
+    exit;
+}
+
+/* =========================================
+   OPTIONAL ROLE SECURITY
+   (adjust if needed)
+========================================= */
+if (!in_array($role, ["electric_company", "admin"])) {
+    http_response_code(403);
+    echo json_encode([
+        "success" => false,
+        "message" => "Forbidden: only electric_company or admin allowed"
+    ]);
+    exit;
+}
+
+/* =========================================
+   GET electric_company.id (IMPORTANT FIX)
+========================================= */
+$stmt = $conn->prepare("
+    SELECT id 
+    FROM electric_companies 
+    WHERE user_id = :user_id
+    LIMIT 1
+");
+
+$stmt->execute([":user_id" => $user_id]);
+$company = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$company) {
+    http_response_code(404);
+    echo json_encode([
+        "success" => false,
+        "message" => "Electric company profile not found"
+    ]);
+    exit;
+}
+
+$electric_company_id = $company["id"];
+
+/* =========================================
+   INPUT
+========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-/* ================================
-   SUPPORT SINGLE OR BATCH
-================================ */
+if (json_last_error() !== JSON_ERROR_NONE) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid JSON"
+    ]);
+    exit;
+}
 
 $notifications = $data["notifications"] ?? null;
 
-/*
-Example batch:
-{
-  "notifications": [
-    {
-      "user_id": 1,
-      "title": "Maintenance",
-      "message": "Power interruption"
-    },
-    {
-      "user_id": 2,
-      "title": "Maintenance",
-      "message": "Power interruption"
-    }
-  ]
+/* =========================================
+   VALIDATION
+========================================= */
+if (!$notifications && !isset($data["user_id"], $data["title"], $data["message"])) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Missing required fields"
+    ]);
+    exit;
 }
-*/
 
+/* =========================================
+   INSERT
+========================================= */
 try {
 
     $conn->beginTransaction();
 
-    if ($notifications) {
+    $stmt = $conn->prepare("
+        INSERT INTO notifications 
+        (user_id, title, message, type)
+        VALUES (:user_id, :title, :message, :type)
+    ");
 
-        // BATCH INSERT
-        $stmt = $conn->prepare("
-            INSERT INTO notifications (user_id, title, message, type)
-            VALUES (:user_id, :title, :message, :type)
-        ");
+    /* ================================
+       BATCH INSERT
+    ================================ */
+    if ($notifications) {
 
         foreach ($notifications as $n) {
 
@@ -63,13 +127,11 @@ try {
             ]);
         }
 
-    } else {
-
-        // SINGLE INSERT
-        $stmt = $conn->prepare("
-            INSERT INTO notifications (user_id, title, message, type)
-            VALUES (:user_id, :title, :message, :type)
-        ");
+    } 
+    /* ================================
+       SINGLE INSERT
+    ================================ */
+    else {
 
         $stmt->execute([
             ":user_id" => $data["user_id"],
@@ -83,7 +145,8 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Notification(s) created"
+        "message" => "Notification(s) created",
+        "company_id" => $electric_company_id
     ]);
 
 } catch (PDOException $e) {
@@ -94,6 +157,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => $e->getMessage() // IMPORTANT for debugging
     ]);
 }

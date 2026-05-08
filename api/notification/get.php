@@ -1,19 +1,27 @@
 <?php
 
 header("Content-Type: application/json");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
-$user_id = $_SESSION['user']['id'] ?? null;
+/* =========================
+   JWT AUTH
+========================= */
+$user = getUserFromJWT();
 
-if (!$user_id) {
+if (!$user) {
     http_response_code(401);
-    echo json_encode(["success" => false, "message" => "Unauthorized"]);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
     exit;
 }
+
+$user_id = $user["id"];
 
 try {
 
@@ -24,7 +32,9 @@ try {
         ORDER BY created_at DESC
     ");
 
-    $stmt->execute([":user_id" => $user_id]);
+    $stmt->execute([
+        ":user_id" => $user_id
+    ]);
 
     $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

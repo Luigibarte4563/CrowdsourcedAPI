@@ -1,27 +1,41 @@
 <?php
 
 header("Content-Type: application/json");
-session_start();
 
 require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
 
-$user_id = $_SESSION['user']['id'] ?? null;
+/* =========================
+   JWT AUTH
+========================= */
+$user = getUserFromJWT();
 
-if (!$user_id) {
+if (!$user) {
     http_response_code(401);
-    echo json_encode(["success" => false, "message" => "Unauthorized"]);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized (invalid JWT)"
+    ]);
     exit;
 }
 
+$user_id = $user["id"];
+
+/* =========================
+   INPUT
+========================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
 $notification_id = $data["id"] ?? null;
 
 if (!$notification_id) {
     http_response_code(400);
-    echo json_encode(["success" => false, "message" => "ID required"]);
+    echo json_encode([
+        "success" => false,
+        "message" => "ID required"
+    ]);
     exit;
 }
 
