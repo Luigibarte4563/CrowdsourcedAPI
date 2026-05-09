@@ -1,54 +1,140 @@
 <?php
 
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=UTF-8");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+
 $conn = getConnection();
-
-/* =========================
-   JWT AUTH
-========================= */
-$user = getUserFromJWT();
-
-if (!$user) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized (invalid JWT)"
-    ]);
-    exit;
-}
-
-$user_id = $user["id"];
 
 try {
 
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    /* =========================================
+       JWT AUTH
+    ========================================= */
+    $user = getUserFromJWT();
+
+    if (!$user) {
+
+        http_response_code(401);
+
+        echo json_encode([
+            "success" => false,
+            "message" => "Unauthorized"
+        ]);
+
+        exit;
+    }
+
+    $user_id = (int)$user["id"];
+
+    /* =========================================
+       OPTIONAL LIMIT
+    ========================================= */
+    $limit = isset($_GET['limit'])
+        ? (int)$_GET['limit']
+        : 50;
+
+    if ($limit <= 0) {
+        $limit = 50;
+    }
+
+    /* =========================================
+       GET NOTIFICATIONS
+    ========================================= */
     $stmt = $conn->prepare("
-        SELECT *
+        SELECT
+
+            id,
+            user_id,
+            title,
+            message,
+            type,
+            is_read,
+            maintenance_id,
+            source_type,
+            created_at
+
         FROM notifications
+
         WHERE user_id = :user_id
+
         ORDER BY created_at DESC
+
+        LIMIT :limit_value
     ");
 
-    $stmt->execute([
+    $stmt->bindValue(
+        ":user_id",
+        $user_id,
+        PDO::PARAM_INT
+    );
+
+    $stmt->bindValue(
+        ":limit_value",
+        $limit,
+        PDO::PARAM_INT
+    );
+
+    $stmt->execute();
+
+    $notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /* =========================================
+       UNREAD COUNT
+    ========================================= */
+    $unreadStmt = $conn->prepare("
+        SELECT COUNT(*) as unread_count
+        FROM notifications
+        WHERE user_id = :user_id
+        AND is_read = 0
+    ");
+
+    $unreadStmt->execute([
         ":user_id" => $user_id
     ]);
 
-    $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $unread = $unreadStmt->fetch(PDO::FETCH_ASSOC);
 
+    /* =========================================
+       RESPONSE
+    ========================================= */
     echo json_encode([
+
         "success" => true,
-        "data" => $data
+
+        "total" => count($notifications),
+
+        "unread_count" => (int)$unread['unread_count'],
+
+        "data" => $notifications
+
     ]);
 
 } catch (PDOException $e) {
 
     http_response_code(500);
 
+    error_log(
+        "Get Notifications Error: " .
+        $e->getMessage()
+    );
+
     echo json_encode([
+
         "success" => false,
-        "message" => "Database error"
+
+        "message" => "Database error",
+
+        "error" => $e->getMessage()
+
     ]);
 }
+
+exit;
+?>
