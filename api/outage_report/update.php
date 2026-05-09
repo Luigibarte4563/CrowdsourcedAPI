@@ -1,6 +1,10 @@
 <?php
 
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=UTF-8");
+
+// prevent ANY HTML/PHP warning breaking JSON
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
@@ -8,9 +12,9 @@ require_once __DIR__ . '/../services/get_coordinates.php';
 
 $conn = getConnection();
 
-/* =========================================
-   JWT AUTH (REPLACES SESSION)
-========================================= */
+/* ================================
+   JWT AUTH
+================================ */
 $user = getUserFromJWT();
 
 if (!$user) {
@@ -33,23 +37,25 @@ if (!$user_id) {
     exit;
 }
 
-/* =========================================
-   INPUT JSON
-========================================= */
-$data = json_decode(file_get_contents("php://input"), true);
+/* ================================
+   READ RAW INPUT (SAFE)
+================================ */
+$rawInput = file_get_contents("php://input");
+$data = json_decode($rawInput, true);
 
 if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Invalid JSON"
+        "message" => "Invalid JSON format",
+        "error" => json_last_error_msg()
     ]);
     exit;
 }
 
-/* =========================================
-   REQUIRED ID
-========================================= */
+/* ================================
+   VALIDATE ID
+================================ */
 $id = $data["id"] ?? null;
 
 if (!$id) {
@@ -61,9 +67,9 @@ if (!$id) {
     exit;
 }
 
-/* =========================================
-   GET OWN REPORT
-========================================= */
+/* ================================
+   GET REPORT (OWNERSHIP CHECK)
+================================ */
 $stmt = $conn->prepare("
     SELECT * FROM outage_reports
     WHERE id = :id AND user_id = :user_id
@@ -86,24 +92,27 @@ if (!$report) {
     exit;
 }
 
-/* =========================================
-   FIELDS
-========================================= */
+/* ================================
+   SAFE UPDATE FIELDS
+================================ */
 $location_name   = trim($data["location_name"] ?? $report["location_name"]);
 $description     = trim($data["description"] ?? $report["description"]);
 $category        = $data["category"] ?? $report["category"];
 $severity        = $data["severity"] ?? $report["severity"];
-$affected_houses = $data["affected_houses"] ?? $report["affected_houses"];
+$affected_houses = (int)($data["affected_houses"] ?? $report["affected_houses"]);
 $status          = $data["status"] ?? $report["status"];
-
-$is_active       = $data["is_active"] ?? $report["is_active"];
+$is_active       = (int)($data["is_active"] ?? $report["is_active"]);
 $hazard_type     = $data["hazard_type"] ?? $report["hazard_type"];
 $started_at      = $data["started_at"] ?? $report["started_at"];
 
-/* =========================================
-   GEO UPDATE IF CHANGED
-========================================= */
-if ($location_name !== $report["location_name"]) {
+/* ================================
+   GEO UPDATE
+================================ */
+$latitude  = $report["latitude"];
+$longitude = $report["longitude"];
+
+if (!empty($data["location_name"]) &&
+    $data["location_name"] !== $report["location_name"]) {
 
     $geo = getCoordinates($location_name);
 
@@ -118,34 +127,11 @@ if ($location_name !== $report["location_name"]) {
 
     $latitude  = $geo["latitude"];
     $longitude = $geo["longitude"];
-
-} else {
-    $latitude  = $report["latitude"];
-    $longitude = $report["longitude"];
 }
 
-/* =========================================
-   DISTANCE FUNCTION
-========================================= */
-function haversineDistance($lat1, $lon1, $lat2, $lon2) {
-
-    $earthRadius = 6371000;
-
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-
-    $a = sin($dLat/2) * sin($dLat/2) +
-         cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-         sin($dLon/2) * sin($dLon/2);
-
-    $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-
-    return $earthRadius * $c;
-}
-
-/* =========================================
-   BARANGAY LIST
-========================================= */
+/* ================================
+   BARANGAY CHECK
+================================ */
 $barangays = [
     ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
     ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
@@ -156,38 +142,40 @@ $barangays = [
     ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>1500],
 ];
 
-/* =========================================
-   GET BARANGAY
-========================================= */
-function getBarangay($lat, $lng, $barangays) {
+function haversine($lat1,$lon1,$lat2,$lon2){
+    $R = 6371000;
+    $dLat = deg2rad($lat2-$lat1);
+    $dLon = deg2rad($lon2-$lon1);
 
-    foreach ($barangays as $b) {
+    $a = sin($dLat/2)**2 +
+         cos(deg2rad($lat1)) *
+         cos(deg2rad($lat2)) *
+         sin($dLon/2)**2;
 
-        $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
-
-        if ($distance <= $b["radius"]) {
-            return $b["name"];
-        }
-    }
-
-    return false;
+    return 2*$R*atan2(sqrt($a), sqrt(1-$a));
 }
 
-$barangay = getBarangay($latitude, $longitude, $barangays);
+$barangay = null;
 
-/* BLOCK OUTSIDE AREA */
-if (!$barangay) {
+foreach($barangays as $b){
+    if(haversine($latitude,$longitude,$b["lat"],$b["lng"]) <= $b["radius"]){
+        $barangay = $b["name"];
+        break;
+    }
+}
+
+if(!$barangay){
     http_response_code(403);
     echo json_encode([
         "success" => false,
-        "message" => "Location is outside Dagupan City coverage"
+        "message" => "Outside coverage area"
     ]);
     exit;
 }
 
-/* =========================================
+/* ================================
    UPDATE QUERY
-========================================= */
+================================ */
 $stmt = $conn->prepare("
     UPDATE outage_reports SET
         location_name = :location_name,
@@ -220,11 +208,8 @@ $success = $stmt->execute([
     ":status" => $status
 ]);
 
-/* =========================================
-   RESPONSE
-========================================= */
 echo json_encode([
     "success" => $success,
-    "message" => $success ? "Report updated successfully" : "Update failed",
+    "message" => $success ? "Updated successfully" : "Update failed",
     "barangay" => $barangay
 ]);

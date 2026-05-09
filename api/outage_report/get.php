@@ -8,13 +8,12 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (STILL REQUIRED)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
 if (!$user) {
     http_response_code(401);
-
     echo json_encode([
         "success" => false,
         "message" => "Unauthorized (invalid JWT)"
@@ -23,19 +22,20 @@ if (!$user) {
 }
 
 /* =========================================
-   OPTIONAL QUERY PARAMETERS
+   OPTIONAL FILTERS
 ========================================= */
 $status   = $_GET['status'] ?? null;
 $category = $_GET['category'] ?? null;
-$active   = $_GET['is_active'] ?? null;
 
 /* =========================================
-   BASE QUERY (NO USER FILTER = ALL REPORTS)
+   BASE QUERY
+   IMPORTANT FIX: hide cancelled reports
 ========================================= */
 $sql = "
     SELECT 
         id,
         user_id,
+        report_key,
         location_name,
         latitude,
         longitude,
@@ -48,31 +48,35 @@ $sql = "
         hazard_type,
         started_at,
         status,
-        verified_by,
+        verified_by_company_id,
+        resolved_by_company_id,
+        verified_at,
+        resolved_at,
+        resolution_note,
+        maintenance_id,
         created_at,
         updated_at
     FROM outage_reports
-    WHERE is_deleted = 0
+    WHERE status != 'rejected'
+      AND is_active = 1
 ";
 
 $params = [];
 
 /* =========================================
-   OPTIONAL FILTERS
+   FILTER: STATUS
 ========================================= */
-if ($status) {
+if (!empty($status)) {
     $sql .= " AND status = :status";
     $params[':status'] = $status;
 }
 
-if ($category) {
+/* =========================================
+   FILTER: CATEGORY
+========================================= */
+if (!empty($category)) {
     $sql .= " AND category = :category";
     $params[':category'] = $category;
-}
-
-if ($active !== null) {
-    $sql .= " AND is_active = :is_active";
-    $params[':is_active'] = $active;
 }
 
 /* =========================================
@@ -80,9 +84,6 @@ if ($active !== null) {
 ========================================= */
 $sql .= " ORDER BY created_at DESC";
 
-/* =========================================
-   EXECUTE
-========================================= */
 try {
 
     $stmt = $conn->prepare($sql);
@@ -92,7 +93,7 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "All reports fetched successfully",
+        "message" => "Reports fetched successfully",
         "count" => count($reports),
         "data" => $reports
     ]);

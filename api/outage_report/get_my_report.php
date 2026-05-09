@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACES SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -21,21 +21,13 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-    exit;
-}
+$user_id = $user['id'];
 
 try {
 
     /* =========================================
        FETCH USER REPORTS
+       - excludes cancelled/rejected reports
     ========================================= */
     $stmt = $conn->prepare("
         SELECT 
@@ -53,12 +45,16 @@ try {
             hazard_type,
             started_at,
             status,
-            verified_by,
+            verified_by_company_id,
+            resolved_by_company_id,
+            verified_at,
+            resolved_at,
+            resolution_note,
             created_at,
             updated_at
         FROM outage_reports
         WHERE user_id = :user_id
-          AND is_deleted = 0
+          AND status != 'rejected'
         ORDER BY created_at DESC
     ");
 

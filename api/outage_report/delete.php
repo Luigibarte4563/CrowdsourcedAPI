@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACED SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -21,16 +21,7 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid token user"
-    ]);
-    exit;
-}
+$user_id = $user['id'];
 
 /* =========================================
    INPUT JSON
@@ -61,14 +52,20 @@ if ($id <= 0) {
 }
 
 /* =========================================
-   DELETE QUERY
+   SOFT DELETE (CANCEL REPORT)
 ========================================= */
 try {
 
+    // ensure report belongs to user AND is still active
     $stmt = $conn->prepare("
-        DELETE FROM outage_reports
+        UPDATE outage_reports
+        SET 
+            status = 'rejected',
+            is_active = 0,
+            resolution_note = 'Cancelled by user'
         WHERE id = :id
         AND user_id = :user_id
+        AND status IN ('active','under_review')
     ");
 
     $stmt->execute([
@@ -77,16 +74,17 @@ try {
     ]);
 
     if ($stmt->rowCount() === 0) {
+
         echo json_encode([
             "success" => false,
-            "message" => "No record found or unauthorized"
+            "message" => "Cannot cancel this report (already resolved or not found)"
         ]);
         exit;
     }
 
     echo json_encode([
         "success" => true,
-        "message" => "Report deleted successfully"
+        "message" => "Report cancelled successfully"
     ]);
 
 } catch (PDOException $e) {

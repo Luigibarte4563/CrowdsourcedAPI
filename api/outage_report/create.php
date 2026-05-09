@@ -10,7 +10,7 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACED SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -23,34 +23,13 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-    exit;
-}
+$user_id = $user['id'];
 
 /* =========================================
    INPUT JSON
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (json_last_error() !== JSON_ERROR_NONE) {
-    http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid JSON body"
-    ]);
-    exit;
-}
-
-/* =========================================
-   REQUIRED INPUTS
-========================================= */
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
@@ -59,6 +38,45 @@ if ($location_name === "" || $description === "") {
     echo json_encode([
         "success" => false,
         "message" => "location_name and description are required"
+    ]);
+    exit;
+}
+
+/* =========================================
+   CHECK ACTIVE REPORT (ANTI-SPAM LOGIC)
+========================================= */
+try {
+
+    $check = $conn->prepare("
+        SELECT id 
+        FROM outage_reports 
+        WHERE user_id = :user_id
+        AND status IN ('active','under_review','verified')
+        LIMIT 1
+    ");
+
+    $check->execute([
+        ":user_id" => $user_id
+    ]);
+
+    $existing = $check->fetch(PDO::FETCH_ASSOC);
+
+    if ($existing) {
+
+        http_response_code(403);
+
+        echo json_encode([
+            "success" => false,
+            "message" => "You already have an active outage report. Wait until it is resolved."
+        ]);
+        exit;
+    }
+
+} catch (PDOException $e) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Validation error"
     ]);
     exit;
 }
@@ -81,7 +99,7 @@ $latitude  = $geo["latitude"];
 $longitude = $geo["longitude"];
 
 /* =========================================
-   DISTANCE FUNCTION
+   BARANGAY CHECK
 ========================================= */
 function haversineDistance($lat1, $lon1, $lat2, $lon2) {
 
@@ -99,9 +117,6 @@ function haversineDistance($lat1, $lon1, $lat2, $lon2) {
     return $earthRadius * $c;
 }
 
-/* =========================================
-   BARANGAY DATA (UNCHANGED)
-========================================= */
 $barangays = [
     ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
     ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
@@ -116,13 +131,9 @@ $barangays = [
     ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1200]
 ];
 
-/* =========================================
-   CHECK LOCATION
-========================================= */
-function isInsideDagupanBarangay($lat, $lng, $barangays) {
+function isInside($lat, $lng, $barangays) {
 
     foreach ($barangays as $b) {
-
         $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
 
         if ($distance <= $b["radius"]) {
@@ -133,7 +144,7 @@ function isInsideDagupanBarangay($lat, $lng, $barangays) {
     return false;
 }
 
-$matched_barangay = isInsideDagupanBarangay($latitude, $longitude, $barangays);
+$matched_barangay = isInside($latitude, $longitude, $barangays);
 
 if (!$matched_barangay) {
     http_response_code(403);
@@ -150,21 +161,19 @@ if (!$matched_barangay) {
 $category        = $data["category"] ?? "power_outage";
 $severity        = $data["severity"] ?? "moderate";
 $image_proof     = $data["image_proof"] ?? null;
-$affected_houses = $data["affected_houses"] ?? 1;
-$is_active       = $data["is_active"] ?? "yes";
+$affected_houses = (int) ($data["affected_houses"] ?? 1);
 $hazard_type     = $data["hazard_type"] ?? "none";
 $started_at      = $data["started_at"] ?? null;
-$status          = "unverified";
-$verified_by     = null;
 
 /* =========================================
-   INSERT
+   INSERT REPORT
 ========================================= */
 try {
 
     $stmt = $conn->prepare("
         INSERT INTO outage_reports (
             user_id,
+            report_key,
             location_name,
             latitude,
             longitude,
@@ -176,10 +185,10 @@ try {
             is_active,
             hazard_type,
             started_at,
-            status,
-            verified_by
+            status
         ) VALUES (
             :user_id,
+            :report_key,
             :location_name,
             :latitude,
             :longitude,
@@ -188,16 +197,16 @@ try {
             :description,
             :image_proof,
             :affected_houses,
-            :is_active,
+            1,
             :hazard_type,
             :started_at,
-            :status,
-            :verified_by
+            'active'
         )
     ");
 
     $stmt->execute([
         ":user_id" => $user_id,
+        ":report_key" => uniqid("OR-"),
         ":location_name" => $location_name,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
@@ -206,11 +215,8 @@ try {
         ":description" => $description,
         ":image_proof" => $image_proof,
         ":affected_houses" => $affected_houses,
-        ":is_active" => $is_active,
         ":hazard_type" => $hazard_type,
-        ":started_at" => $started_at,
-        ":status" => $status,
-        ":verified_by" => $verified_by
+        ":started_at" => $started_at
     ]);
 
     echo json_encode([
