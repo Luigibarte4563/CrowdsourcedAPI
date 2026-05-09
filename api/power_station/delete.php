@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACES SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -33,7 +33,7 @@ if (!$user_id) {
 }
 
 /* =========================================
-   INPUT JSON
+   INPUT
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
@@ -46,13 +46,13 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     exit;
 }
 
-$id = $data["id"] ?? null;
+$id = isset($data["id"]) ? (int)$data["id"] : 0;
 
-if (!$id) {
+if ($id <= 0) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "ID required"
+        "message" => "Valid station ID required"
     ]);
     exit;
 }
@@ -74,16 +74,17 @@ try {
     ]);
 
     if ($stmt->rowCount() === 0) {
+        http_response_code(404);
         echo json_encode([
             "success" => false,
-            "message" => "Not found or unauthorized"
+            "message" => "Station not found or not owned by user"
         ]);
         exit;
     }
 
     echo json_encode([
         "success" => true,
-        "message" => "Deleted successfully"
+        "message" => "Power station deleted successfully"
     ]);
 
 } catch (PDOException $e) {
@@ -93,5 +94,6 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
+        // "error" => $e->getMessage() // enable only for debugging
     ]);
 }

@@ -9,7 +9,7 @@ require_once __DIR__ . '/../services/get_coordinates.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACES SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -38,7 +38,7 @@ if (!$user_id) {
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (json_last_error() !== JSON_ERROR_NONE) {
+if (json_last_error() !== JSON_ERROR_NONE || !$data) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -47,6 +47,7 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     exit;
 }
 
+/* REQUIRED FIELDS */
 $station_name = trim($data["station_name"] ?? "");
 $location_name = trim($data["location_name"] ?? "");
 
@@ -54,7 +55,44 @@ if ($station_name === "" || $location_name === "") {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "station_name and location_name required"
+        "message" => "station_name and location_name are required"
+    ]);
+    exit;
+}
+
+/* =========================================
+   LIMIT: ONLY 1 POWER STATION PER USER
+========================================= */
+try {
+
+    $check = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM power_stations
+        WHERE created_by = :created_by
+    ");
+
+    $check->execute([
+        ":created_by" => $user_id
+    ]);
+
+    $row = $check->fetch(PDO::FETCH_ASSOC);
+
+    if ((int)$row['total'] >= 1) {
+
+        http_response_code(403);
+        echo json_encode([
+            "success" => false,
+            "message" => "You are only allowed to create 1 power station. Please update your existing station instead."
+        ]);
+        exit;
+    }
+
+} catch (PDOException $e) {
+
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Failed to check station limit"
     ]);
     exit;
 }
@@ -82,6 +120,7 @@ $longitude = $geo["longitude"];
 $station_type = $data["station_type"] ?? "power_station";
 $access_type = $data["access_type"] ?? "free";
 $availability_status = $data["availability_status"] ?? "available";
+
 $operating_hours = $data["operating_hours"] ?? null;
 $charging_type = $data["charging_type"] ?? null;
 $description = $data["description"] ?? null;
@@ -149,5 +188,6 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
+        // "error" => $e->getMessage() // enable for debugging only
     ]);
 }

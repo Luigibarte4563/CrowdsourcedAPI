@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACES SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -21,9 +21,9 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
+$user_id = (int)($user['id'] ?? 0);
 
-if (!$user_id) {
+if ($user_id <= 0) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -31,9 +31,6 @@ if (!$user_id) {
     ]);
     exit;
 }
-
-/* force correct type */
-$user_id = (int) $user_id;
 
 try {
 
@@ -73,7 +70,6 @@ try {
     echo json_encode([
         "success" => true,
         "message" => "My stations fetched successfully",
-        "user_id" => $user_id,
         "count" => count($stations),
         "data" => $stations
     ]);
@@ -85,5 +81,6 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
+        // "error" => $e->getMessage() // enable only for debugging
     ]);
 }

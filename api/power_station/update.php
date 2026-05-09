@@ -9,7 +9,7 @@ require_once __DIR__ . '/../services/get_coordinates.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH (REPLACES SESSION)
+   JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
 
@@ -22,9 +22,9 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
+$user_id = (int)($user['id'] ?? 0);
 
-if (!$user_id) {
+if ($user_id <= 0) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -38,7 +38,7 @@ if (!$user_id) {
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (json_last_error() !== JSON_ERROR_NONE || !$data) {
+if (!$data || json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -59,7 +59,7 @@ if (!$id) {
 }
 
 /* =========================================
-   GET EXISTING (SECURITY FIX: USER OWNERSHIP)
+   GET EXISTING (SECURITY CHECK)
 ========================================= */
 $stmt = $conn->prepare("
     SELECT * FROM power_stations
@@ -84,31 +84,10 @@ if (!$station) {
 }
 
 /* =========================================
-   UPDATE FIELDS (SAFE FALLBACKS)
+   INPUT FIELDS
 ========================================= */
 $station_name = $data["station_name"] ?? $station["station_name"];
 $location_name = $data["location_name"] ?? $station["location_name"];
-
-if ($location_name !== $station["location_name"]) {
-
-    $geo = getCoordinates($location_name);
-
-    if (!$geo["success"]) {
-        http_response_code(400);
-        echo json_encode([
-            "success" => false,
-            "message" => $geo["message"]
-        ]);
-        exit;
-    }
-
-    $latitude = $geo["latitude"];
-    $longitude = $geo["longitude"];
-
-} else {
-    $latitude = $station["latitude"];
-    $longitude = $station["longitude"];
-}
 
 $station_type = $data["station_type"] ?? $station["station_type"];
 $access_type = $data["access_type"] ?? $station["access_type"];
@@ -118,7 +97,52 @@ $charging_type = $data["charging_type"] ?? $station["charging_type"];
 $description = $data["description"] ?? $station["description"];
 
 /* =========================================
-   UPDATE QUERY (JWT SAFE)
+   NEW: MANUAL PIN SUPPORT (MAP UPDATE)
+========================================= */
+$latitude = $data["latitude"] ?? null;
+$longitude = $data["longitude"] ?? null;
+
+/* =========================================
+   IF NO COORDINATES PROVIDED → GEOCODE
+========================================= */
+if ($latitude === null || $longitude === null) {
+
+    if ($location_name !== $station["location_name"]) {
+
+        $geo = getCoordinates($location_name);
+
+        if (!$geo["success"]) {
+            http_response_code(400);
+            echo json_encode([
+                "success" => false,
+                "message" => $geo["message"]
+            ]);
+            exit;
+        }
+
+        $latitude = $geo["latitude"];
+        $longitude = $geo["longitude"];
+
+    } else {
+        $latitude = $station["latitude"];
+        $longitude = $station["longitude"];
+    }
+}
+
+/* =========================================
+   VALIDATE COORDINATES
+========================================= */
+if (!is_numeric($latitude) || !is_numeric($longitude)) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid coordinates"
+    ]);
+    exit;
+}
+
+/* =========================================
+   UPDATE QUERY
 ========================================= */
 try {
 
@@ -155,7 +179,12 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Updated successfully"
+        "message" => "Updated successfully",
+        "data" => [
+            "id" => $id,
+            "latitude" => $latitude,
+            "longitude" => $longitude
+        ]
     ]);
 
 } catch (PDOException $e) {

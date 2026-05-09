@@ -21,9 +21,9 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
+$user_id = (int)($user['id'] ?? 0);
 
-if (!$user_id) {
+if ($user_id <= 0) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -33,7 +33,7 @@ if (!$user_id) {
 }
 
 /* =========================================
-   GET USER LOCATION
+   GET USER LOCATION (OPTIONAL)
 ========================================= */
 try {
 
@@ -58,62 +58,26 @@ try {
 }
 
 /* =========================================
-   RADIUS
+   RADIUS (OPTIONAL FILTER)
 ========================================= */
-$radius = isset($_GET['radius']) ? (int) $_GET['radius'] : 3000;
+$radius = isset($_GET['radius']) ? (int)$_GET['radius'] : null;
 
 /* =========================================
-   FALLBACK FUNCTION
-========================================= */
-function fetchAllStations($conn) {
-
-    $stmt = $conn->prepare("
-        SELECT 
-            id,
-            station_name,
-            location_name,
-            latitude,
-            longitude,
-            station_type,
-            access_type,
-            availability_status,
-            operating_hours,
-            charging_type,
-            description,
-            image,
-            0 AS distance
-        FROM power_stations
-        WHERE availability_status = 'available'
-        ORDER BY id DESC
-    ");
-
-    $stmt->execute();
-
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/* =========================================
-   MAIN LOGIC
+   BASE QUERY: ALL AVAILABLE STATIONS
 ========================================= */
 try {
 
-    $stations = [];
+    $hasLocation = !empty($userData['latitude']) && !empty($userData['longitude']);
 
-    /* =========================================
-       NEARBY SEARCH
-    ========================================= */
-    if (
-        $userData &&
-        $userData['latitude'] !== null &&
-        $userData['longitude'] !== null
-    ) {
+    if ($hasLocation) {
 
-        $lat = (float) $userData['latitude'];
-        $lng = (float) $userData['longitude'];
+        $lat = (float)$userData['latitude'];
+        $lng = (float)$userData['longitude'];
 
         $stmt = $conn->prepare("
             SELECT 
                 id,
+                created_by,
                 station_name,
                 location_name,
                 latitude,
@@ -125,6 +89,8 @@ try {
                 charging_type,
                 description,
                 image,
+                created_at,
+                updated_at,
 
                 (
                     6371000 * ACOS(
@@ -138,34 +104,64 @@ try {
 
             FROM power_stations
             WHERE availability_status = 'available'
-            HAVING distance <= :radius
-            ORDER BY distance ASC
         ");
 
         $stmt->execute([
             ":lat" => $lat,
-            ":lng" => $lng,
-            ":radius" => $radius
+            ":lng" => $lng
         ]);
 
+        $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        /* APPLY RADIUS FILTER ONLY IF PROVIDED */
+        if ($radius) {
+            $stations = array_values(array_filter($stations, function ($s) use ($radius) {
+                return isset($s['distance']) && $s['distance'] <= $radius;
+            }));
+        }
+
+        /* SORT BY DISTANCE */
+        usort($stations, fn($a, $b) => $a['distance'] <=> $b['distance']);
+
+    } else {
+
+        /* NO LOCATION → RETURN ALL AVAILABLE */
+        $stmt = $conn->prepare("
+            SELECT 
+                id,
+                created_by,
+                station_name,
+                location_name,
+                latitude,
+                longitude,
+                station_type,
+                access_type,
+                availability_status,
+                operating_hours,
+                charging_type,
+                description,
+                image,
+                created_at,
+                updated_at,
+                0 AS distance
+            FROM power_stations
+            WHERE availability_status = 'available'
+            ORDER BY created_at DESC
+        ");
+
+        $stmt->execute();
         $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /* =========================================
-       FALLBACK
+       RESPONSE
     ========================================= */
-    if (empty($stations)) {
-        $stations = fetchAllStations($conn);
-    }
-
     echo json_encode([
         "success" => true,
-        "message" => empty($stations)
-            ? "No stations found"
-            : "Stations loaded successfully",
-        "fallback" => empty($userData) || empty($userData['latitude']),
-        "radius" => $radius,
+        "message" => "Available power stations fetched successfully",
         "count" => count($stations),
+        "has_location" => $hasLocation,
+        "radius" => $radius,
         "data" => $stations
     ]);
 
