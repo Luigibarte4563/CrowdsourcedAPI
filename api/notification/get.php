@@ -19,7 +19,7 @@ try {
     ========================================= */
     $user = getUserFromJWT();
 
-    if (!$user) {
+    if (!$user || !isset($user["id"])) {
 
         http_response_code(401);
 
@@ -27,29 +27,28 @@ try {
             "success" => false,
             "message" => "Unauthorized"
         ]);
-
         exit;
     }
 
     $user_id = (int)$user["id"];
 
     /* =========================================
-       OPTIONAL LIMIT
+       QUERY PARAMS
     ========================================= */
-    $limit = isset($_GET['limit'])
-        ? (int)$_GET['limit']
-        : 50;
+    $limit      = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
+    $offset     = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
+    $onlyUnread = isset($_GET['unread']) ? (int)$_GET['unread'] : 0;
+    $type       = $_GET['type'] ?? null;
 
-    if ($limit <= 0) {
-        $limit = 50;
-    }
+    if ($limit <= 0) $limit = 50;
+    if ($limit > 200) $limit = 200; // safety cap
+    if ($offset < 0) $offset = 0;
 
     /* =========================================
-       GET NOTIFICATIONS
+       BASE QUERY
     ========================================= */
-    $stmt = $conn->prepare("
+    $sql = "
         SELECT
-
             id,
             user_id,
             title,
@@ -58,28 +57,43 @@ try {
             is_read,
             maintenance_id,
             source_type,
+            location,
             created_at
-
         FROM notifications
-
         WHERE user_id = :user_id
+    ";
 
-        ORDER BY created_at DESC
+    $params = [
+        ":user_id" => $user_id
+    ];
 
-        LIMIT :limit_value
-    ");
+    /* =========================================
+       FILTER: UNREAD ONLY
+    ========================================= */
+    if ($onlyUnread === 1) {
+        $sql .= " AND is_read = 0 ";
+    }
 
-    $stmt->bindValue(
-        ":user_id",
-        $user_id,
-        PDO::PARAM_INT
-    );
+    /* =========================================
+       FILTER: TYPE
+    ========================================= */
+    if (!empty($type)) {
+        $sql .= " AND type = :type ";
+        $params[":type"] = $type;
+    }
 
-    $stmt->bindValue(
-        ":limit_value",
-        $limit,
-        PDO::PARAM_INT
-    );
+    /* =========================================
+       ORDER + SAFE LIMIT/OFFSET
+       (FIXED: no PDO binding issues)
+    ========================================= */
+    $sql .= " ORDER BY created_at DESC ";
+    $sql .= " LIMIT $limit OFFSET $offset ";
+
+    $stmt = $conn->prepare($sql);
+
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value);
+    }
 
     $stmt->execute();
 
@@ -105,34 +119,24 @@ try {
        RESPONSE
     ========================================= */
     echo json_encode([
-
         "success" => true,
-
         "total" => count($notifications),
-
         "unread_count" => (int)$unread['unread_count'],
-
+        "limit" => $limit,
+        "offset" => $offset,
         "data" => $notifications
-
     ]);
 
-} catch (PDOException $e) {
+} catch (Throwable $e) {
 
     http_response_code(500);
 
-    error_log(
-        "Get Notifications Error: " .
-        $e->getMessage()
-    );
+    error_log("Get Notifications Error: " . $e->getMessage());
 
     echo json_encode([
-
         "success" => false,
-
-        "message" => "Database error",
-
+        "message" => "Server error",
         "error" => $e->getMessage()
-
     ]);
 }
 
