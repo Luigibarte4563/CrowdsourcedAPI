@@ -8,53 +8,14 @@ function createNotification(
     string $type = 'system',
     ?int $referenceId = null,
     ?string $sourceType = null,
-    ?string $altMessage = null   // ✅ NEW: message for NOT affected users
+    ?string $location = null   // ✅ FIX: ADD LOCATION PARAM
 ) {
 
-    if (empty($userIds)) {
-        return false;
-    }
+    if (empty($userIds)) return false;
 
-    /* CLEAN IDS */
     $userIds = array_values(array_unique(array_map('intval', $userIds)));
 
-    if (empty($userIds)) {
-        return false;
-    }
-
-    /* GET LOCATION */
-    $location = null;
-
-    if ($referenceId) {
-
-        $locStmt = $conn->prepare("
-            SELECT affected_area
-            FROM maintenance_schedules
-            WHERE id = :id
-            LIMIT 1
-        ");
-
-        $locStmt->execute([":id" => $referenceId]);
-        $location = $locStmt->fetchColumn();
-    }
-
-    /* FILTER USERS */
-    $placeholders = implode(',', array_fill(0, count($userIds), '?'));
-
-    $userStmt = $conn->prepare("
-        SELECT id
-        FROM users
-        WHERE id IN ($placeholders)
-        AND role != 'electric_company'
-    ");
-
-    $userStmt->execute($userIds);
-
-    $filteredUsers = $userStmt->fetchAll(PDO::FETCH_COLUMN);
-
-    if (empty($filteredUsers)) {
-        return false;
-    }
+    if (empty($userIds)) return false;
 
     /* INSERT */
     $insert = $conn->prepare("
@@ -66,8 +27,7 @@ function createNotification(
             maintenance_id,
             source_type,
             location
-        )
-        VALUES (
+        ) VALUES (
             :user_id,
             :title,
             :message,
@@ -78,28 +38,17 @@ function createNotification(
         )
     ");
 
-    foreach ($filteredUsers as $userId) {
+    foreach ($userIds as $id) {
 
-        $finalMessage = $message;
-
-        // fallback for outside-area users
-        if ($altMessage) {
-            $finalMessage = $altMessage;
-        }
-
-        $ok = $insert->execute([
-            ":user_id"        => $userId,
-            ":title"          => $title,
-            ":message"        => $finalMessage,
-            ":type"           => $type,
+        $insert->execute([
+            ":user_id" => $id,
+            ":title" => $title,
+            ":message" => $message,
+            ":type" => $type,
             ":maintenance_id" => $referenceId,
-            ":source_type"    => $sourceType,
-            ":location"       => $location
+            ":source_type" => $sourceType,
+            ":location" => $location   // ✅ FIXED
         ]);
-
-        if (!$ok) {
-            error_log("Notification insert failed: " . json_encode($insert->errorInfo()));
-        }
     }
 
     return true;

@@ -5,15 +5,31 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-/* SERVICES */
 require_once __DIR__ . '/../services/create_notification.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
 
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
-
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+/* =========================================
+   DISTANCE FUNCTION
+========================================= */
+function haversineDistance($lat1, $lon1, $lat2, $lon2)
+{
+    $earthRadius = 6371000;
+
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
+
+    $a = sin($dLat / 2) ** 2 +
+        cos(deg2rad($lat1)) *
+        cos(deg2rad($lat2)) *
+        sin($dLon / 2) ** 2;
+
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+    return $earthRadius * $c;
+}
 
 try {
 
@@ -22,157 +38,101 @@ try {
     ========================================= */
     $user = getUserFromJWT();
 
-    if (!$user) {
-        http_response_code(401);
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
-        exit;
-    }
-
-    if (($user['role'] ?? '') !== 'electric_company') {
-        http_response_code(403);
-        echo json_encode([
-            "success" => false,
-            "message" => "Forbidden"
-        ]);
-        exit;
+    if (!$user || ($user['role'] ?? '') !== 'electric_company') {
+        throw new Exception("Unauthorized");
     }
 
     /* =========================================
-       GET COMPANY
+       COMPANY
     ========================================= */
-    $companyStmt = $conn->prepare("
+    $stmt = $conn->prepare("
         SELECT id, company_name
         FROM electric_companies
         WHERE user_id = :user_id
         LIMIT 1
     ");
-
-    $companyStmt->execute([":user_id" => $user['id']]);
-
-    $company = $companyStmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([":user_id" => $user['id']]);
+    $company = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$company) {
-        http_response_code(404);
-        echo json_encode([
-            "success" => false,
-            "message" => "Company not found"
-        ]);
-        exit;
+        throw new Exception("Company not found");
     }
 
-    $company_name = $company['company_name'] ?? 'Electric Company';
+    $company_name = $company['company_name'];
 
     /* =========================================
        INPUT
     ========================================= */
     $data = json_decode(file_get_contents("php://input"), true);
 
-    $maintenance_date = trim($data['maintenance_date'] ?? '');
-    $start_time       = trim($data['start_time'] ?? '');
-    $end_time         = trim($data['end_time'] ?? '');
-    $description      = trim($data['description'] ?? '');
-    $location_name    = trim($data['location_name'] ?? '');
-    $notify_all       = (bool)($data['notify_all'] ?? false);
-    $radius           = (int)($data['radius'] ?? 2000);
+    $maintenance_date = $data['maintenance_date'] ?? '';
+    $start_time = $data['start_time'] ?? '';
+    $end_time = $data['end_time'] ?? '';
+    $description = $data['description'] ?? '';
+    $radius = (int) ($data['radius'] ?? 2000);
+    $barangays = $data['barangays'] ?? [];
+    $notify_all = $data['notify_all'] ?? false;
 
-    if (empty($maintenance_date) || empty($start_time) || empty($end_time)) {
-        http_response_code(400);
-        echo json_encode([
-            "success" => false,
-            "message" => "Missing required fields"
-        ]);
-        exit;
+    if (!$maintenance_date || !$start_time || !$end_time) {
+        throw new Exception("Missing required fields");
     }
 
-    if (!$notify_all && empty($location_name)) {
-        http_response_code(400);
-        echo json_encode([
-            "success" => false,
-            "message" => "location_name is required"
-        ]);
-        exit;
-    }
-
-    /* =========================================
-       GET LOCATION
-    ========================================= */
-    if ($notify_all) {
-
-        $location  = "ALL AREAS";
-        $latitude  = 16.0430;
-        $longitude = 120.3335;
-
-    } else {
-
-        $geo = getCoordinates($location_name);
-
-        if (!$geo["success"]) {
-            http_response_code(404);
-            echo json_encode([
-                "success" => false,
-                "message" => $geo["message"]
-            ]);
-            exit;
-        }
-
-        $location  = $geo["location_name"];
-        $latitude  = $geo["latitude"];
-        $longitude = $geo["longitude"];
+    if (!is_array($barangays) || empty($barangays)) {
+        throw new Exception("No barangays selected");
     }
 
     /* =========================================
        INSERT MAINTENANCE
     ========================================= */
-    $stmt = $conn->prepare("
+    $insert = $conn->prepare("
         INSERT INTO maintenance_schedules (
             electric_company_id,
-            affected_area,
-            latitude,
-            longitude,
+            affected_barangays,
+            radius,
             maintenance_date,
             start_time,
             end_time,
-            description,
-            radius,
-            affected_barangays
+            description
         ) VALUES (
             :company_id,
-            :area,
-            :lat,
-            :lng,
+            :barangays,
+            :radius,
             :date,
             :start,
             :end,
-            :desc,
-            :radius,
-            :barangays
+            :desc
         )
     ");
 
-    $stmt->execute([
+    $insert->execute([
         ":company_id" => $company['id'],
-        ":area" => $location,
-        ":lat" => $latitude,
-        ":lng" => $longitude,
+        ":barangays" => json_encode($barangays),
+        ":radius" => $radius,
         ":date" => $maintenance_date,
         ":start" => $start_time,
         ":end" => $end_time,
-        ":desc" => $description,
-        ":radius" => $radius,
-        ":barangays" => json_encode($notify_all ? ["ALL"] : [$location])
+        ":desc" => $description
     ]);
 
     $maintenance_id = $conn->lastInsertId();
 
     /* =========================================
-       FORMAT TIME
+       GET BARANGAY COORDINATES
     ========================================= */
-    $formattedDate  = date("F d, Y", strtotime($maintenance_date));
-    $formattedStart = date("h:i A", strtotime($start_time));
-    $formattedEnd   = date("h:i A", strtotime($end_time));
+    $barangayCoords = [];
+
+    foreach ($barangays as $b) {
+
+        $geo = getCoordinates($b);
+
+        if (!$geo["success"])
+            continue;
+
+        $barangayCoords[$b] = [
+            "lat" => $geo["latitude"],
+            "lng" => $geo["longitude"]
+        ];
+    }
 
     /* =========================================
        GET USERS
@@ -182,88 +142,94 @@ try {
         FROM users
         WHERE role = 'user'
     ");
-
     $userStmt->execute();
     $users = $userStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* =========================================
-       DISTANCE FUNCTION
-    ========================================= */
-    function haversineDistance($lat1, $lon1, $lat2, $lon2)
-    {
-        $earthRadius = 6371000;
-
-        $dLat = deg2rad($lat2 - $lat1);
-        $dLon = deg2rad($lon2 - $lon1);
-
-        $a =
-            sin($dLat / 2) ** 2 +
-            cos(deg2rad($lat1)) *
-            cos(deg2rad($lat2)) *
-            sin($dLon / 2) ** 2;
-
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-
-        return $earthRadius * $c;
-    }
+    $notified = 0;
 
     /* =========================================
-       NOTIFY USERS (FIXED)
+       NOTIFICATION LOGIC
     ========================================= */
     foreach ($users as $u) {
 
         $userId = $u['id'];
-        $isAffected = false;
 
-        if (!$notify_all && $u['latitude'] && $u['longitude']) {
+        if (!$u['latitude'] || !$u['longitude']) {
+            continue;
+        }
+
+        $affected = [];
+
+        /* =========================================
+           CHECK ALL SELECTED BARANGAYS
+        ========================================= */
+        foreach ($barangayCoords as $name => $coord) {
 
             $distance = haversineDistance(
-                $latitude,
-                $longitude,
+                $coord['lat'],
+                $coord['lng'],
                 $u['latitude'],
                 $u['longitude']
             );
 
             if ($distance <= $radius) {
-                $isAffected = true;
+                $affected[] = $name;
             }
         }
 
         $title = "Scheduled Power Maintenance";
 
-        if ($isAffected || $notify_all) {
+        $formattedDate = date("F d, Y", strtotime($maintenance_date));
+        $formattedStart = date("h:i A", strtotime($start_time));
+        $formattedEnd = date("h:i A", strtotime($end_time));
 
-            $message = "
-⚠ Your area is affected by scheduled maintenance.
+        $allBarangays = implode(", ", $barangays);
+$affectedList = !empty($affected) ? implode(", ", $affected) : null;
 
-📍 Location: {$location}
+if (!empty($affected)) {
+
+    $message = "⚠ Power Interruption Notice
+
+This is an official maintenance announcement.
+
+📍 All Affected Areas: {$allBarangays}
+📍 Your Affected Barangay(s): {$affectedList}
 📅 Date: {$formattedDate}
 🕒 Time: {$formattedStart} - {$formattedEnd}
 
-⚡ {$company_name}
-";
+⚡ Please prepare for temporary interruption.
+{$company_name}";
 
-        } else {
+    $location = $allBarangays;
 
-            $message = "
-ℹ Maintenance notice for {$location}.
+} else {
 
+    $message = "ℹ Power Maintenance Advisory
+
+This is an official maintenance announcement.
+
+📍 Affected Areas: {$allBarangays}
 📅 Date: {$formattedDate}
 🕒 Time: {$formattedStart} - {$formattedEnd}
 
-Your area is not directly affected.
-";
-        }
+⚡ Your area is NOT directly affected, but nearby areas may experience temporary fluctuations.
+{$company_name}";
+
+    $location = $allBarangays;
+}
 
         createNotification(
             $conn,
             [$userId],
             $title,
-            trim($message),
+            $message,
             "maintenance",
             $maintenance_id,
-            "maintenance"
+            "maintenance",
+            $location
         );
+
+        $notified++;
     }
 
     /* =========================================
@@ -273,8 +239,7 @@ Your area is not directly affected.
         "success" => true,
         "message" => "Maintenance created successfully",
         "maintenance_id" => $maintenance_id,
-        "location" => $location,
-        "users_notified" => count($users)
+        "users_notified" => $notified
     ]);
 
 } catch (Throwable $e) {
@@ -283,10 +248,6 @@ Your area is not directly affected.
 
     echo json_encode([
         "success" => false,
-        "message" => "Server error",
-        "error" => $e->getMessage()
+        "message" => $e->getMessage()
     ]);
 }
-
-exit;
-?>

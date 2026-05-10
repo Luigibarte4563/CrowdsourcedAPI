@@ -15,14 +15,13 @@ try {
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     /* =========================================
-       JWT AUTH
+       AUTH
     ========================================= */
     $user = getUserFromJWT();
 
     if (!$user || !isset($user["id"])) {
 
         http_response_code(401);
-
         echo json_encode([
             "success" => false,
             "message" => "Unauthorized"
@@ -35,14 +34,13 @@ try {
     /* =========================================
        QUERY PARAMS
     ========================================= */
-    $limit      = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
-    $offset     = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
-    $onlyUnread = isset($_GET['unread']) ? (int)$_GET['unread'] : 0;
-    $type       = $_GET['type'] ?? null;
+    $limit      = max(1, min((int)($_GET['limit'] ?? 50), 200));
+    $offset     = max(0, (int)($_GET['offset'] ?? 0));
+    $onlyUnread = (int)($_GET['unread'] ?? 0);
 
-    if ($limit <= 0) $limit = 50;
-    if ($limit > 200) $limit = 200; // safety cap
-    if ($offset < 0) $offset = 0;
+    $type            = $_GET['type'] ?? null;
+    $source_type     = $_GET['source_type'] ?? null;
+    $maintenance_id  = $_GET['maintenance_id'] ?? null;
 
     /* =========================================
        BASE QUERY
@@ -68,7 +66,7 @@ try {
     ];
 
     /* =========================================
-       FILTER: UNREAD ONLY
+       FILTER: UNREAD
     ========================================= */
     if ($onlyUnread === 1) {
         $sql .= " AND is_read = 0 ";
@@ -83,8 +81,23 @@ try {
     }
 
     /* =========================================
-       ORDER + SAFE LIMIT/OFFSET
-       (FIXED: no PDO binding issues)
+       FILTER: SOURCE TYPE
+    ========================================= */
+    if (!empty($source_type)) {
+        $sql .= " AND source_type = :source_type ";
+        $params[":source_type"] = $source_type;
+    }
+
+    /* =========================================
+       FILTER: MAINTENANCE ID
+    ========================================= */
+    if (!empty($maintenance_id)) {
+        $sql .= " AND maintenance_id = :maintenance_id ";
+        $params[":maintenance_id"] = $maintenance_id;
+    }
+
+    /* =========================================
+       ORDER + PAGINATION
     ========================================= */
     $sql .= " ORDER BY created_at DESC ";
     $sql .= " LIMIT $limit OFFSET $offset ";
@@ -116,7 +129,7 @@ try {
     $unread = $unreadStmt->fetch(PDO::FETCH_ASSOC);
 
     /* =========================================
-       RESPONSE
+       RESPONSE (CLEAN FOR FRONTEND)
     ========================================= */
     echo json_encode([
         "success" => true,
