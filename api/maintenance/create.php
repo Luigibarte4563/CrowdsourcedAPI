@@ -125,13 +125,42 @@ try {
 
         $geo = getCoordinates($b);
 
-        if (!$geo["success"])
-            continue;
+        if (!$geo["success"]) continue;
 
         $barangayCoords[$b] = [
             "lat" => $geo["latitude"],
             "lng" => $geo["longitude"]
         ];
+    }
+
+    /* =========================================
+       INSERT LOCATIONS (FIXED SAFELY HERE)
+    ========================================= */
+    if (!empty($barangayCoords)) {
+
+        $locInsert = $conn->prepare("
+            INSERT INTO maintenance_locations (
+                maintenance_id,
+                barangay_name,
+                latitude,
+                longitude
+            ) VALUES (
+                :maintenance_id,
+                :barangay,
+                :lat,
+                :lng
+            )
+        ");
+
+        foreach ($barangayCoords as $name => $coord) {
+
+            $locInsert->execute([
+                ":maintenance_id" => $maintenance_id,
+                ":barangay" => $name,
+                ":lat" => $coord["lat"],
+                ":lng" => $coord["lng"]
+            ]);
+        }
     }
 
     /* =========================================
@@ -160,9 +189,6 @@ try {
 
         $affected = [];
 
-        /* =========================================
-           CHECK ALL SELECTED BARANGAYS
-        ========================================= */
         foreach ($barangayCoords as $name => $coord) {
 
             $distance = haversineDistance(
@@ -184,11 +210,11 @@ try {
         $formattedEnd = date("h:i A", strtotime($end_time));
 
         $allBarangays = implode(", ", $barangays);
-$affectedList = !empty($affected) ? implode(", ", $affected) : null;
+        $affectedList = !empty($affected) ? implode(", ", $affected) : null;
 
-if (!empty($affected)) {
+        if (!empty($affected)) {
 
-    $message = "⚠ Power Interruption Notice
+            $message = "⚠ Power Interruption Notice
 
 This is an official maintenance announcement.
 
@@ -200,11 +226,11 @@ This is an official maintenance announcement.
 ⚡ Please prepare for temporary interruption.
 {$company_name}";
 
-    $location = $allBarangays;
+            $location = $allBarangays;
 
-} else {
+        } else {
 
-    $message = "ℹ Power Maintenance Advisory
+            $message = "ℹ Power Maintenance Advisory
 
 This is an official maintenance announcement.
 
@@ -215,8 +241,8 @@ This is an official maintenance announcement.
 ⚡ Your area is NOT directly affected, but nearby areas may experience temporary fluctuations.
 {$company_name}";
 
-    $location = $allBarangays;
-}
+            $location = $allBarangays;
+        }
 
         createNotification(
             $conn,
@@ -232,9 +258,6 @@ This is an official maintenance announcement.
         $notified++;
     }
 
-    /* =========================================
-       RESPONSE
-    ========================================= */
     echo json_encode([
         "success" => true,
         "message" => "Maintenance created successfully",
