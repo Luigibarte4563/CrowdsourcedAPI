@@ -1,370 +1,201 @@
-<!-- =========================================
-     LEAFLET MAP + LIST + EDIT MODAL (FULL FIXED)
-========================================= -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<?php
 
-<style>
+header("Content-Type: application/json; charset=UTF-8");
 
-.wrapper{
-    display:grid;
-    grid-template-columns:350px 1fr;
-    gap:15px;
-    margin-top:20px;
-    font-family:Arial;
-}
+require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
+require_once __DIR__ . '/../services/get_coordinates.php';
 
-/* LIST */
-.list-card{
-    background:#fff;
-    padding:15px;
-    border-radius:12px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.1);
-    height:700px;
-    overflow:auto;
-}
-
-.item{
-    border:1px solid #eee;
-    padding:10px;
-    border-radius:10px;
-    margin-bottom:10px;
-}
-
-.item h4{
-    margin:0;
-}
-
-.item small{
-    display:block;
-    color:#777;
-    margin-top:5px;
-}
-
-.btn{
-    margin-top:8px;
-    padding:6px 10px;
-    border:none;
-    border-radius:6px;
-    cursor:pointer;
-    font-size:12px;
-}
-
-.edit{
-    background:#3498db;
-    color:white;
-}
-
-/* MAP */
-.map-card{
-    background:#fff;
-    padding:15px;
-    border-radius:12px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.1);
-}
-
-#maintenanceMap{
-    width:100%;
-    height:700px;
-    border-radius:12px;
-}
-
-/* MODAL */
-#editModal{
-    display:none;
-    position:fixed;
-    top:0;
-    left:0;
-    width:100%;
-    height:100%;
-    background:rgba(0,0,0,0.5);
-    justify-content:center;
-    align-items:center;
-    z-index:9999;
-}
-
-.modal-box{
-    background:#fff;
-    width:400px;
-    padding:20px;
-    border-radius:12px;
-}
-
-.modal-box input,
-.modal-box textarea{
-    width:100%;
-    padding:8px;
-    margin-top:5px;
-    margin-bottom:10px;
-}
-
-.modal-box button{
-    width:100%;
-    padding:10px;
-    border:none;
-    border-radius:8px;
-    cursor:pointer;
-}
-
-.save{
-    background:#27ae60;
-    color:white;
-}
-
-.close{
-    background:#e74c3c;
-    color:white;
-    margin-top:8px;
-}
-
-</style>
-
-<div class="wrapper">
-
-    <!-- LIST -->
-    <div class="list-card">
-        <h3>📋 Maintenance List</h3>
-        <div id="maintenanceList"></div>
-    </div>
-
-    <!-- MAP -->
-    <div class="map-card">
-        <h3>🗺️ Map View</h3>
-        <div id="maintenanceMap"></div>
-    </div>
-
-</div>
-
-<!-- =========================================
-     EDIT MODAL
-========================================= -->
-<div id="editModal">
-
-    <div class="modal-box">
-
-        <h3>Edit Maintenance</h3>
-
-        <input type="hidden" id="edit_id">
-
-        <label>Date</label>
-        <input type="date" id="edit_date">
-
-        <label>Start</label>
-        <input type="time" id="edit_start">
-
-        <label>End</label>
-        <input type="time" id="edit_end">
-
-        <label>Description</label>
-        <textarea id="edit_desc"></textarea>
-
-        <label>Radius</label>
-        <input type="number" id="edit_radius">
-
-        <button class="save" onclick="submitUpdate()">
-            Save Update
-        </button>
-
-        <button class="close" onclick="closeModal()">
-            Close
-        </button>
-
-    </div>
-
-</div>
-
-<script>
+$conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 /* =========================================
-   MAP INIT
+   DISTANCE FUNCTION (kept for consistency)
 ========================================= */
-let map;
-let layers = [];
+function haversineDistance($lat1, $lon1, $lat2, $lon2)
+{
+    $earthRadius = 6371000;
 
-const barangayData = {
-    "Bonuan Gueset": { lat:16.0585, lng:120.3345 },
-    "Bonuan Boquig": { lat:16.0600, lng:120.3200 },
-    "Bonuan Binloc": { lat:16.0620, lng:120.3100 },
-    "Lucao": { lat:16.0435, lng:120.3310 },
-    "Tapuac": { lat:16.0460, lng:120.3450 }
-};
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
 
-function initMap(){
-    map = L.map('maintenanceMap').setView([16.0430, 120.3335], 12);
+    $a = sin($dLat / 2) ** 2 +
+        cos(deg2rad($lat1)) *
+        cos(deg2rad($lat2)) *
+        sin($dLon / 2) ** 2;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-        attribution:'© OpenStreetMap'
-    }).addTo(map);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+    return $earthRadius * $c;
 }
 
-/* =========================================
-   CLEAR MAP
-========================================= */
-function clearMap(){
-    layers.forEach(l => map.removeLayer(l));
-    layers = [];
-}
+try {
 
-/* =========================================
-   LOAD DATA
-========================================= */
-async function loadData(){
+    /* =========================================
+       AUTH
+    ========================================= */
+    $user = getUserFromJWT();
 
-    try{
-
-        const res = await fetch(
-            "http://localhost/crowdsourcedapi/api/maintenance/get.php",
-            { credentials:"include" }
-        );
-
-        const result = await res.json();
-
-        if(!result.success) throw new Error(result.message);
-
-        const list = document.getElementById("maintenanceList");
-        list.innerHTML = "";
-
-        clearMap();
-
-        const items = result.data || [];
-
-        items.forEach(item => {
-
-            /* ================= LIST ================= */
-            const div = document.createElement("div");
-            div.className = "item";
-
-            div.innerHTML = `
-                <h4>⚡ ${item.company_name}</h4>
-                <small>
-                    📅 ${item.maintenance_date}<br>
-                    🕒 ${item.start_time} - ${item.end_time}<br>
-                    📍 ${item.affected_barangays?.join(", ") || ""}
-                </small>
-
-                <button class="btn edit">Edit</button>
-            `;
-
-            div.querySelector(".edit").onclick = () => openEdit(item);
-
-            list.appendChild(div);
-
-            /* ================= MAP ================= */
-            const barangays = item.affected_barangays || [];
-
-            let latSum = 0;
-            let lngSum = 0;
-            let count = 0;
-
-            barangays.forEach(name => {
-
-                const geo = barangayData[name];
-                if(!geo) return;
-
-                latSum += geo.lat;
-                lngSum += geo.lng;
-                count++;
-
-                const marker = L.marker([geo.lat, geo.lng]).addTo(map);
-
-                marker.bindPopup(`
-                    <b>${name}</b><br>
-                    ${item.company_name}
-                `);
-
-                layers.push(marker);
-            });
-
-            if(count > 0){
-
-                const circle = L.circle(
-                    [latSum/count, lngSum/count],
-                    {
-                        radius: item.radius || 2000,
-                        color:"#e74c3c",
-                        fillOpacity:0.2
-                    }
-                ).addTo(map);
-
-                layers.push(circle);
-            }
-
-        });
-
-    }catch(err){
-        console.error(err);
+    if (!$user || ($user['role'] ?? '') !== 'electric_company') {
+        throw new Exception("Unauthorized");
     }
-}
 
-/* =========================================
-   OPEN MODAL
-========================================= */
-function openEdit(item){
+    /* =========================================
+       COMPANY
+    ========================================= */
+    $stmt = $conn->prepare("
+        SELECT id, company_name
+        FROM electric_companies
+        WHERE user_id = :user_id
+        LIMIT 1
+    ");
+    $stmt->execute([":user_id" => $user['id']]);
+    $company = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    console.log("EDIT DATA:", item);
+    if (!$company) {
+        throw new Exception("Company not found");
+    }
 
-    document.getElementById("edit_id").value = item.id;
-    document.getElementById("edit_date").value = item.maintenance_date;
-    document.getElementById("edit_start").value = item.start_time;
-    document.getElementById("edit_end").value = item.end_time;
-    document.getElementById("edit_desc").value = item.description;
-    document.getElementById("edit_radius").value = item.radius;
+    /* =========================================
+       INPUT
+    ========================================= */
+    $data = json_decode(file_get_contents("php://input"), true);
 
-    document.getElementById("editModal").style.display = "flex";
-}
+    $maintenance_id = $data['maintenance_id'] ?? null;
+    $maintenance_date = $data['maintenance_date'] ?? '';
+    $start_time = $data['start_time'] ?? '';
+    $end_time = $data['end_time'] ?? '';
+    $description = $data['description'] ?? '';
+    $radius = (int) ($data['radius'] ?? 2000);
+    $barangays = $data['barangays'] ?? [];
 
-/* =========================================
-   CLOSE MODAL
-========================================= */
-function closeModal(){
-    document.getElementById("editModal").style.display = "none";
-}
+    /* 🔥 NEW: STATUS INPUT */
+    $status = $data['status'] ?? null;
 
-/* =========================================
-   UPDATE API
-========================================= */
-async function submitUpdate(){
+    if (!$maintenance_id) {
+        throw new Exception("Maintenance ID is required");
+    }
 
-    const payload = {
-        maintenance_id: document.getElementById("edit_id").value,
-        maintenance_date: document.getElementById("edit_date").value,
-        start_time: document.getElementById("edit_start").value,
-        end_time: document.getElementById("edit_end").value,
-        description: document.getElementById("edit_desc").value,
-        radius: Number(document.getElementById("edit_radius").value)
-    };
+    if (!$maintenance_date || !$start_time || !$end_time) {
+        throw new Exception("Missing required fields");
+    }
 
-    try{
+    /* =========================================
+       CHECK OWNERSHIP
+    ========================================= */
+    $check = $conn->prepare("
+        SELECT id
+        FROM maintenance_schedules
+        WHERE id = :id
+        AND electric_company_id = :company_id
+        LIMIT 1
+    ");
 
-        const res = await fetch(
-            "http://localhost/crowdsourcedapi/api/maintenance/update.php",
-            {
-                method:"POST",
-                headers:{ "Content-Type":"application/json" },
-                credentials:"include",
-                body: JSON.stringify(payload)
-            }
-        );
+    $check->execute([
+        ":id" => $maintenance_id,
+        ":company_id" => $company['id']
+    ]);
 
-        const result = await res.json();
+    if (!$check->fetch()) {
+        throw new Exception("Maintenance not found or not allowed");
+    }
 
-        if(!result.success){
-            throw new Error(result.message);
+    /* =========================================
+       UPDATE MAINTENANCE (WITH STATUS)
+    ========================================= */
+    $update = $conn->prepare("
+        UPDATE maintenance_schedules
+        SET
+            maintenance_date = :date,
+            start_time = :start,
+            end_time = :end,
+            description = :desc,
+            radius = :radius,
+            status = COALESCE(:status, status),
+            updated_at = NOW()
+        WHERE id = :id
+    ");
+
+    $update->execute([
+        ":date" => $maintenance_date,
+        ":start" => $start_time,
+        ":end" => $end_time,
+        ":desc" => $description,
+        ":radius" => $radius,
+        ":status" => $status,
+        ":id" => $maintenance_id
+    ]);
+
+    /* =========================================
+       REMOVE OLD LOCATIONS
+    ========================================= */
+    $del = $conn->prepare("
+        DELETE FROM maintenance_locations
+        WHERE maintenance_id = :id
+    ");
+    $del->execute([":id" => $maintenance_id]);
+
+    /* =========================================
+       RE-INSERT LOCATIONS
+    ========================================= */
+    $barangayCoords = [];
+
+    foreach ($barangays as $b) {
+
+        $geo = getCoordinates($b);
+
+        if (!$geo["success"]) continue;
+
+        $barangayCoords[$b] = [
+            "lat" => $geo["latitude"],
+            "lng" => $geo["longitude"]
+        ];
+    }
+
+    if (!empty($barangayCoords)) {
+
+        $locInsert = $conn->prepare("
+            INSERT INTO maintenance_locations (
+                maintenance_id,
+                barangay_name,
+                latitude,
+                longitude
+            ) VALUES (
+                :maintenance_id,
+                :barangay,
+                :lat,
+                :lng
+            )
+        ");
+
+        foreach ($barangayCoords as $name => $coord) {
+
+            $locInsert->execute([
+                ":maintenance_id" => $maintenance_id,
+                ":barangay" => $name,
+                ":lat" => $coord["lat"],
+                ":lng" => $coord["lng"]
+            ]);
         }
-
-        alert("Updated successfully!");
-
-        closeModal();
-        loadData();
-
-    }catch(err){
-        alert("Error: " + err.message);
     }
+
+    /* =========================================
+       RESPONSE
+    ========================================= */
+
+    echo json_encode([
+        "success" => true,
+        "message" => "Maintenance updated successfully",
+        "maintenance_id" => $maintenance_id,
+        "status" => $status ?? "unchanged"
+    ]);
+
+} catch (Throwable $e) {
+
+    http_response_code(500);
+
+    echo json_encode([
+        "success" => false,
+        "message" => $e->getMessage()
+    ]);
 }
-
-/* INIT */
-initMap();
-loadData();
-setInterval(loadData, 30000);
-
-</script>

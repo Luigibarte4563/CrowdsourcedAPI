@@ -58,6 +58,7 @@ try {
         throw new Exception("Company not found");
     }
 
+    $company_id = $company['id'];
     $company_name = $company['company_name'];
 
     /* =========================================
@@ -71,7 +72,6 @@ try {
     $description = $data['description'] ?? '';
     $radius = (int) ($data['radius'] ?? 2000);
     $barangays = $data['barangays'] ?? [];
-    $notify_all = $data['notify_all'] ?? false;
 
     if (!$maintenance_date || !$start_time || !$end_time) {
         throw new Exception("Missing required fields");
@@ -79,6 +79,34 @@ try {
 
     if (!is_array($barangays) || empty($barangays)) {
         throw new Exception("No barangays selected");
+    }
+
+    /* =========================================
+       DUPLICATE CHECK (IMPORTANT FIX)
+       Block ONLY ACTIVE schedules
+    ========================================= */
+    $check = $conn->prepare("
+        SELECT ms.id, ms.status, ml.barangay_name
+        FROM maintenance_schedules ms
+        JOIN maintenance_locations ml ON ms.id = ml.maintenance_id
+        WHERE ms.status != 'done'
+        AND ms.maintenance_date = :date
+    ");
+    $check->execute([":date" => $maintenance_date]);
+    $existing = $check->fetchAll(PDO::FETCH_ASSOC);
+
+    $blockedBarangays = [];
+
+    foreach ($existing as $row) {
+        if (in_array($row['barangay_name'], $barangays)) {
+            $blockedBarangays[] = $row['barangay_name'];
+        }
+    }
+
+    if (!empty($blockedBarangays)) {
+        throw new Exception(
+            "Maintenance already exists for: " . implode(", ", array_unique($blockedBarangays))
+        );
     }
 
     /* =========================================
@@ -92,7 +120,8 @@ try {
             maintenance_date,
             start_time,
             end_time,
-            description
+            description,
+            status
         ) VALUES (
             :company_id,
             :barangays,
@@ -100,12 +129,13 @@ try {
             :date,
             :start,
             :end,
-            :desc
+            :desc,
+            'pending'
         )
     ");
 
     $insert->execute([
-        ":company_id" => $company['id'],
+        ":company_id" => $company_id,
         ":barangays" => json_encode($barangays),
         ":radius" => $radius,
         ":date" => $maintenance_date,
@@ -117,7 +147,7 @@ try {
     $maintenance_id = $conn->lastInsertId();
 
     /* =========================================
-       GET BARANGAY COORDINATES
+       GET COORDINATES
     ========================================= */
     $barangayCoords = [];
 
@@ -134,37 +164,33 @@ try {
     }
 
     /* =========================================
-       INSERT LOCATIONS (FIXED SAFELY HERE)
+       INSERT LOCATIONS
     ========================================= */
-    if (!empty($barangayCoords)) {
+    $locInsert = $conn->prepare("
+        INSERT INTO maintenance_locations (
+            maintenance_id,
+            barangay_name,
+            latitude,
+            longitude
+        ) VALUES (
+            :maintenance_id,
+            :barangay,
+            :lat,
+            :lng
+        )
+    ");
 
-        $locInsert = $conn->prepare("
-            INSERT INTO maintenance_locations (
-                maintenance_id,
-                barangay_name,
-                latitude,
-                longitude
-            ) VALUES (
-                :maintenance_id,
-                :barangay,
-                :lat,
-                :lng
-            )
-        ");
-
-        foreach ($barangayCoords as $name => $coord) {
-
-            $locInsert->execute([
-                ":maintenance_id" => $maintenance_id,
-                ":barangay" => $name,
-                ":lat" => $coord["lat"],
-                ":lng" => $coord["lng"]
-            ]);
-        }
+    foreach ($barangayCoords as $name => $coord) {
+        $locInsert->execute([
+            ":maintenance_id" => $maintenance_id,
+            ":barangay" => $name,
+            ":lat" => $coord["lat"],
+            ":lng" => $coord["lng"]
+        ]);
     }
 
     /* =========================================
-       GET USERS
+       USERS
     ========================================= */
     $userStmt = $conn->prepare("
         SELECT id, latitude, longitude
@@ -181,11 +207,7 @@ try {
     ========================================= */
     foreach ($users as $u) {
 
-        $userId = $u['id'];
-
-        if (!$u['latitude'] || !$u['longitude']) {
-            continue;
-        }
+        if (!$u['latitude'] || !$u['longitude']) continue;
 
         $affected = [];
 
@@ -216,43 +238,34 @@ try {
 
             $message = "⚠ Power Interruption Notice
 
-This is an official maintenance announcement.
+📍 Affected: {$allBarangays}
+📍 Your Area: {$affectedList}
+📅 {$formattedDate}
+🕒 {$formattedStart} - {$formattedEnd}
 
-📍 All Affected Areas: {$allBarangays}
-📍 Your Affected Barangay(s): {$affectedList}
-📅 Date: {$formattedDate}
-🕒 Time: {$formattedStart} - {$formattedEnd}
-
-⚡ Please prepare for temporary interruption.
 {$company_name}";
-
-            $location = $allBarangays;
-
         } else {
 
-            $message = "ℹ Power Maintenance Advisory
+            $message = "ℹ Power Advisory
 
-This is an official maintenance announcement.
+📍 Affected: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} - {$formattedEnd}
 
-📍 Affected Areas: {$allBarangays}
-📅 Date: {$formattedDate}
-🕒 Time: {$formattedStart} - {$formattedEnd}
+No direct impact in your area.
 
-⚡ Your area is NOT directly affected, but nearby areas may experience temporary fluctuations.
 {$company_name}";
-
-            $location = $allBarangays;
         }
 
         createNotification(
             $conn,
-            [$userId],
+            [$u['id']],
             $title,
             $message,
             "maintenance",
             $maintenance_id,
             "maintenance",
-            $location
+            $allBarangays
         );
 
         $notified++;

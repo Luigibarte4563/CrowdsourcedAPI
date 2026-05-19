@@ -5,44 +5,31 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-/* 🚨 FORCE SAFE ERROR MODE (IMPORTANT) */
-ini_set('display_errors', 0);
-error_reporting(0);
+$conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-ob_start(); // 🔥 prevent accidental output
+/* =========================================
+   AUTO STATUS FUNCTION
+========================================= */
+function computeStatus($date, $start, $end)
+{
+    $now = new DateTime();
+    $startDT = new DateTime("$date $start");
+    $endDT = new DateTime("$date $end");
+
+    if ($now > $endDT) return "done";
+    if ($now >= $startDT && $now <= $endDT) return "ongoing";
+    return "pending";
+}
 
 try {
 
-    $conn = getConnection();
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-    /* =========================================
-       AUTH (SAFE WRAP)
-    ========================================= */
-    $user = null;
-
-    try {
-        $user = getUserFromJWT();
-    } catch (Throwable $e) {
-        $user = null;
-    }
+    $user = getUserFromJWT();
 
     if (!$user) {
-
-        http_response_code(401);
-
-        ob_clean();
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
-
-        exit;
+        throw new Exception("Unauthorized");
     }
 
-    /* =========================================
-       QUERY
-    ========================================= */
     $sql = "
         SELECT 
             ms.id,
@@ -54,10 +41,7 @@ try {
             ms.end_time,
             ms.description,
             ms.affected_barangays,
-            ms.estimated_restoration_time,
-            ms.status,
-            ms.created_at,
-            ms.updated_at
+            ms.status AS db_status
         FROM maintenance_schedules ms
         LEFT JOIN electric_companies ec 
             ON ec.id = ms.electric_company_id
@@ -68,41 +52,29 @@ try {
     $stmt->execute();
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* =========================================
-       LOCATIONS
-    ========================================= */
-    $locStmt = $conn->prepare("
-        SELECT maintenance_id, barangay_name, latitude, longitude
-        FROM maintenance_locations
-    ");
-
-    $locStmt->execute();
-    $locationsRaw = $locStmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $locations = [];
-
-    foreach ($locationsRaw as $loc) {
-
-        $mid = $loc["maintenance_id"];
-
-        $locations[$mid][] = [
-            "barangay_name" => $loc["barangay_name"],
-            "latitude" => (float)$loc["latitude"],
-            "longitude" => (float)$loc["longitude"]
-        ];
-    }
-
-    /* =========================================
-       RESPONSE BUILD
-    ========================================= */
     $data = [];
 
     foreach ($rows as $row) {
 
-        $id = (int)$row["id"];
+        $autoStatus = computeStatus(
+            $row['maintenance_date'],
+            $row['start_time'],
+            $row['end_time']
+        );
+
+        /* OPTIONAL: sync DB so it permanently updates */
+        $update = $conn->prepare("
+            UPDATE maintenance_schedules
+            SET status = :status
+            WHERE id = :id
+        ");
+        $update->execute([
+            ":status" => $autoStatus,
+            ":id" => $row['id']
+        ]);
 
         $data[] = [
-            "id" => $id,
+            "id" => $row["id"],
             "company_name" => $row["company_name"],
             "radius" => (int)$row["radius"],
             "maintenance_date" => $row["maintenance_date"],
@@ -110,29 +82,21 @@ try {
             "end_time" => $row["end_time"],
             "description" => $row["description"],
             "affected_barangays" => json_decode($row["affected_barangays"], true),
-            "locations" => $locations[$id] ?? [],
-            "estimated_restoration_time" => $row["estimated_restoration_time"],
-            "status" => $row["status"],
-            "created_at" => $row["created_at"],
-            "updated_at" => $row["updated_at"]
+            "status" => $autoStatus
         ];
     }
 
-    ob_clean();
-
     echo json_encode([
         "success" => true,
-        "count" => count($data),
         "data" => $data
     ]);
 
 } catch (Throwable $e) {
 
-    ob_clean();
     http_response_code(500);
 
     echo json_encode([
         "success" => false,
-        "message" => "Server error"
+        "message" => $e->getMessage()
     ]);
 }
