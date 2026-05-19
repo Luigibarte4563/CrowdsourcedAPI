@@ -19,10 +19,12 @@ $user = getUserFromJWT();
 
 if (!$user) {
     http_response_code(401);
+
     echo json_encode([
         "success" => false,
         "message" => "Unauthorized (invalid JWT)"
     ]);
+
     exit;
 }
 
@@ -30,26 +32,32 @@ $user_id = $user['id'] ?? null;
 
 if (!$user_id) {
     http_response_code(401);
+
     echo json_encode([
         "success" => false,
         "message" => "Invalid user token"
     ]);
+
     exit;
 }
 
 /* ================================
-   READ RAW INPUT (SAFE)
+   READ RAW INPUT
 ================================ */
 $rawInput = file_get_contents("php://input");
+
 $data = json_decode($rawInput, true);
 
 if (json_last_error() !== JSON_ERROR_NONE) {
+
     http_response_code(400);
+
     echo json_encode([
         "success" => false,
         "message" => "Invalid JSON format",
         "error" => json_last_error_msg()
     ]);
+
     exit;
 }
 
@@ -59,11 +67,14 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 $id = $data["id"] ?? null;
 
 if (!$id) {
+
     http_response_code(400);
+
     echo json_encode([
         "success" => false,
         "message" => "Report ID required"
     ]);
+
     exit;
 }
 
@@ -84,11 +95,14 @@ $stmt->execute([
 $report = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$report) {
+
     http_response_code(403);
+
     echo json_encode([
         "success" => false,
         "message" => "Report not found or not yours"
     ]);
+
     exit;
 }
 
@@ -100,10 +114,21 @@ $description     = trim($data["description"] ?? $report["description"]);
 $category        = $data["category"] ?? $report["category"];
 $severity        = $data["severity"] ?? $report["severity"];
 $affected_houses = (int)($data["affected_houses"] ?? $report["affected_houses"]);
-$status          = $data["status"] ?? $report["status"];
-$is_active       = (int)($data["is_active"] ?? $report["is_active"]);
 $hazard_type     = $data["hazard_type"] ?? $report["hazard_type"];
 $started_at      = $data["started_at"] ?? $report["started_at"];
+
+/* =========================================
+   PROTECT SYSTEM FIELDS
+========================================= */
+
+/*
+   Users CANNOT update:
+   - status
+   - is_active
+*/
+
+$status    = $report["status"];
+$is_active = $report["is_active"];
 
 /* ================================
    GEO UPDATE
@@ -111,17 +136,22 @@ $started_at      = $data["started_at"] ?? $report["started_at"];
 $latitude  = $report["latitude"];
 $longitude = $report["longitude"];
 
-if (!empty($data["location_name"]) &&
-    $data["location_name"] !== $report["location_name"]) {
+if (
+    !empty($data["location_name"]) &&
+    $data["location_name"] !== $report["location_name"]
+) {
 
     $geo = getCoordinates($location_name);
 
     if (!$geo["success"]) {
+
         http_response_code(400);
+
         echo json_encode([
             "success" => false,
             "message" => $geo["message"]
         ]);
+
         exit;
     }
 
@@ -140,36 +170,54 @@ $barangays = [
     ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>1800],
     ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>1500],
     ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>1500],
+    ["name"=>"Herrero-Perez","lat"=>16.0455,"lng"=>120.3380,"radius"=>1500],
+    ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>1500],
+    ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1200],
+    ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1200]
 ];
 
-function haversine($lat1,$lon1,$lat2,$lon2){
-    $R = 6371000;
-    $dLat = deg2rad($lat2-$lat1);
-    $dLon = deg2rad($lon2-$lon1);
+function haversine($lat1, $lon1, $lat2, $lon2) {
 
-    $a = sin($dLat/2)**2 +
+    $R = 6371000;
+
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
+
+    $a = sin($dLat / 2) ** 2 +
          cos(deg2rad($lat1)) *
          cos(deg2rad($lat2)) *
-         sin($dLon/2)**2;
+         sin($dLon / 2) ** 2;
 
-    return 2*$R*atan2(sqrt($a), sqrt(1-$a));
+    return 2 * $R * atan2(sqrt($a), sqrt(1 - $a));
 }
 
 $barangay = null;
 
-foreach($barangays as $b){
-    if(haversine($latitude,$longitude,$b["lat"],$b["lng"]) <= $b["radius"]){
+foreach ($barangays as $b) {
+
+    if (
+        haversine(
+            $latitude,
+            $longitude,
+            $b["lat"],
+            $b["lng"]
+        ) <= $b["radius"]
+    ) {
+
         $barangay = $b["name"];
         break;
     }
 }
 
-if(!$barangay){
+if (!$barangay) {
+
     http_response_code(403);
+
     echo json_encode([
         "success" => false,
         "message" => "Outside coverage area"
     ]);
+
     exit;
 }
 
@@ -185,11 +233,10 @@ $stmt = $conn->prepare("
         severity = :severity,
         description = :description,
         affected_houses = :affected_houses,
-        is_active = :is_active,
         hazard_type = :hazard_type,
-        started_at = :started_at,
-        status = :status
-    WHERE id = :id AND user_id = :user_id
+        started_at = :started_at
+    WHERE id = :id
+    AND user_id = :user_id
 ");
 
 $success = $stmt->execute([
@@ -202,14 +249,14 @@ $success = $stmt->execute([
     ":severity" => $severity,
     ":description" => $description,
     ":affected_houses" => $affected_houses,
-    ":is_active" => $is_active,
     ":hazard_type" => $hazard_type,
-    ":started_at" => $started_at,
-    ":status" => $status
+    ":started_at" => $started_at
 ]);
 
 echo json_encode([
     "success" => $success,
-    "message" => $success ? "Updated successfully" : "Update failed",
+    "message" => $success
+        ? "Updated successfully"
+        : "Update failed",
     "barangay" => $barangay
 ]);
