@@ -15,15 +15,12 @@ try {
     ========================================= */
     $user = getUserFromJWT();
 
-    if (!$user) {
-
+    if (!$user || !isset($user['id'])) {
         http_response_code(401);
-
         echo json_encode([
             "success" => false,
             "message" => "Unauthorized"
         ]);
-
         exit;
     }
 
@@ -34,13 +31,13 @@ try {
     $date = $_GET['date'] ?? null;
 
     /* =========================================
-       QUERY
+       BASE QUERY (FIXED FOR POWERGUIDE SCHEMA)
     ========================================= */
     $sql = "
         SELECT
             ms.id,
-            ms.electric_company_id,
-            ec.company_name,
+            ms.created_by,
+            u.name AS company_name,
 
             ms.affected_barangays,
             ms.radius,
@@ -59,24 +56,23 @@ try {
 
         FROM maintenance_schedules ms
 
-        INNER JOIN electric_companies ec
-            ON ms.electric_company_id = ec.id
+        INNER JOIN users u
+            ON ms.created_by = u.id
+            AND u.role = 'electric_company'
 
         LEFT JOIN maintenance_locations ml
             ON ms.id = ml.maintenance_id
 
-        WHERE ms.status != 'done'
+        WHERE ms.status != 'completed'
     ";
 
     $params = [];
 
     /* =========================================
-       FILTER STATUS
+       FILTER STATUS (SAFE LOGIC)
     ========================================= */
     if (!empty($status)) {
-
         $sql .= " AND ms.status = :status";
-
         $params[':status'] = $status;
     }
 
@@ -84,32 +80,24 @@ try {
        FILTER DATE
     ========================================= */
     if (!empty($date)) {
-
         $sql .= " AND ms.maintenance_date = :date";
-
         $params[':date'] = $date;
     }
 
-    /* =========================================
-       ORDER
-    ========================================= */
     $sql .= "
-        ORDER BY
-            ms.maintenance_date ASC,
-            ms.start_time ASC
+        ORDER BY ms.maintenance_date ASC, ms.start_time ASC
     ";
 
     /* =========================================
        EXECUTE
     ========================================= */
     $stmt = $conn->prepare($sql);
-
     $stmt->execute($params);
 
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     /* =========================================
-       FORMAT MAP DATA
+       GROUPING
     ========================================= */
     $maintenances = [];
 
@@ -120,30 +108,19 @@ try {
         if (!isset($maintenances[$id])) {
 
             $maintenances[$id] = [
-
                 "maintenance_id" => (int)$row['id'],
-
-                "electric_company_id" => (int)$row['electric_company_id'],
-
+                "created_by" => (int)$row['created_by'],
                 "company_name" => $row['company_name'],
 
-                "affected_barangays" => json_decode(
-                    $row['affected_barangays'],
-                    true
-                ),
-
+                "affected_barangays" => json_decode($row['affected_barangays'], true),
                 "radius" => (int)$row['radius'],
 
                 "maintenance_date" => $row['maintenance_date'],
-
                 "start_time" => $row['start_time'],
-
                 "end_time" => $row['end_time'],
 
                 "description" => $row['description'],
-
                 "status" => $row['status'],
-
                 "created_at" => $row['created_at'],
 
                 "locations" => []
@@ -151,19 +128,13 @@ try {
         }
 
         /* =========================================
-           ADD LOCATION
+           ADD LOCATION (SAFE CHECK)
         ========================================= */
-        if (
-            !empty($row['latitude']) &&
-            !empty($row['longitude'])
-        ) {
+        if ($row['latitude'] !== null && $row['longitude'] !== null) {
 
             $maintenances[$id]['locations'][] = [
-
                 "barangay_name" => $row['barangay_name'],
-
                 "latitude" => (float)$row['latitude'],
-
                 "longitude" => (float)$row['longitude']
             ];
         }
@@ -173,13 +144,9 @@ try {
        RESPONSE
     ========================================= */
     echo json_encode([
-
         "success" => true,
-
         "message" => "Maintenance map fetched successfully",
-
         "total" => count($maintenances),
-
         "data" => array_values($maintenances)
     ]);
 
@@ -188,9 +155,7 @@ try {
     http_response_code(500);
 
     echo json_encode([
-
         "success" => false,
-
-        "message" => $e->getMessage()
+        "message" => "Server error"
     ]);
-} 
+}

@@ -5,12 +5,13 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
+require_once __DIR__ . '/../services/create_notification.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 /* =========================================
-   DISTANCE FUNCTION (kept for consistency)
+   DISTANCE FUNCTION
 ========================================= */
 function haversineDistance($lat1, $lon1, $lat2, $lon2)
 {
@@ -41,16 +42,18 @@ try {
     }
 
     /* =========================================
-       COMPANY
+       GET COMPANY
     ========================================= */
-    $stmt = $conn->prepare("
-        SELECT id, company_name
-        FROM electric_companies
-        WHERE user_id = :user_id
+    $companyStmt = $conn->prepare("
+        SELECT id, name AS company_name
+        FROM users
+        WHERE id = :id
+        AND role = 'electric_company'
         LIMIT 1
     ");
-    $stmt->execute([":user_id" => $user['id']]);
-    $company = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $companyStmt->execute([":id" => $user['id']]);
+    $company = $companyStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$company) {
         throw new Exception("Company not found");
@@ -60,40 +63,39 @@ try {
        INPUT
     ========================================= */
     $data = json_decode(file_get_contents("php://input"), true);
+    if (!$data) $data = $_POST;
 
     $maintenance_id = $data['maintenance_id'] ?? null;
     $maintenance_date = $data['maintenance_date'] ?? '';
     $start_time = $data['start_time'] ?? '';
     $end_time = $data['end_time'] ?? '';
     $description = $data['description'] ?? '';
-    $radius = (int) ($data['radius'] ?? 2000);
+    $radius = (int)($data['radius'] ?? 2000);
     $barangays = $data['barangays'] ?? [];
-
-    /* 🔥 NEW: STATUS INPUT */
-    $status = $data['status'] ?? null;
+    $manualStatus = strtolower(trim($data['status'] ?? ''));
 
     if (!$maintenance_id) {
         throw new Exception("Maintenance ID is required");
     }
 
-    if (!$maintenance_date || !$start_time || !$end_time) {
-        throw new Exception("Missing required fields");
+    if (!is_array($barangays)) {
+        $barangays = [];
     }
 
     /* =========================================
-       CHECK OWNERSHIP
+       OWNERSHIP CHECK
     ========================================= */
     $check = $conn->prepare("
         SELECT id
         FROM maintenance_schedules
         WHERE id = :id
-        AND electric_company_id = :company_id
+        AND created_by = :user_id
         LIMIT 1
     ");
 
     $check->execute([
         ":id" => $maintenance_id,
-        ":company_id" => $company['id']
+        ":user_id" => $user['id']
     ]);
 
     if (!$check->fetch()) {
@@ -101,7 +103,44 @@ try {
     }
 
     /* =========================================
-       UPDATE MAINTENANCE (WITH STATUS)
+       COMPANY NAME
+    ========================================= */
+    $companyName = $company['company_name'] ?? 'Electric Company';
+
+    /* =========================================
+       STATUS LOGIC (DB-COMPATIBLE)
+    ========================================= */
+
+    $now = new DateTime();
+
+    $startDT = (!empty($maintenance_date) && !empty($start_time))
+        ? new DateTime("$maintenance_date $start_time")
+        : null;
+
+    $endDT = (!empty($maintenance_date) && !empty($end_time))
+        ? new DateTime("$maintenance_date $end_time")
+        : null;
+
+    $validStatuses = ['upcoming', 'ongoing', 'completed', 'cancelled'];
+
+    if (in_array($manualStatus, $validStatuses, true)) {
+        $finalStatus = $manualStatus;
+    } else {
+        if ($startDT && $endDT) {
+            if ($now > $endDT) {
+                $finalStatus = "completed";
+            } elseif ($now >= $startDT && $now <= $endDT) {
+                $finalStatus = "ongoing";
+            } else {
+                $finalStatus = "upcoming";
+            }
+        } else {
+            $finalStatus = "upcoming";
+        }
+    }
+
+    /* =========================================
+       UPDATE MAIN SCHEDULE
     ========================================= */
     $update = $conn->prepare("
         UPDATE maintenance_schedules
@@ -111,7 +150,7 @@ try {
             end_time = :end,
             description = :desc,
             radius = :radius,
-            status = COALESCE(:status, status),
+            status = :status,
             updated_at = NOW()
         WHERE id = :id
     ");
@@ -122,29 +161,33 @@ try {
         ":end" => $end_time,
         ":desc" => $description,
         ":radius" => $radius,
-        ":status" => $status,
+        ":status" => $finalStatus,
         ":id" => $maintenance_id
     ]);
 
-    /* =========================================
-       REMOVE OLD LOCATIONS
-    ========================================= */
-    $del = $conn->prepare("
-        DELETE FROM maintenance_locations
-        WHERE maintenance_id = :id
-    ");
-    $del->execute([":id" => $maintenance_id]);
+    if ($update->rowCount() === 0) {
+        throw new Exception("Update failed or no changes detected");
+    }
 
     /* =========================================
-       RE-INSERT LOCATIONS
+       DELETE OLD LOCATIONS
+    ========================================= */
+    $conn->prepare("
+        DELETE FROM maintenance_locations
+        WHERE maintenance_id = :id
+    ")->execute([":id" => $maintenance_id]);
+
+    /* =========================================
+       REINSERT LOCATIONS
     ========================================= */
     $barangayCoords = [];
 
     foreach ($barangays as $b) {
+        if (!$b) continue;
 
         $geo = getCoordinates($b);
 
-        if (!$geo["success"]) continue;
+        if (!isset($geo["success"]) || !$geo["success"]) continue;
 
         $barangayCoords[$b] = [
             "lat" => $geo["latitude"],
@@ -152,42 +195,118 @@ try {
         ];
     }
 
-    if (!empty($barangayCoords)) {
+    $insertLoc = $conn->prepare("
+        INSERT INTO maintenance_locations
+        (maintenance_id, barangay_name, latitude, longitude)
+        VALUES (:id, :name, :lat, :lng)
+    ");
 
-        $locInsert = $conn->prepare("
-            INSERT INTO maintenance_locations (
-                maintenance_id,
-                barangay_name,
-                latitude,
-                longitude
-            ) VALUES (
-                :maintenance_id,
-                :barangay,
-                :lat,
-                :lng
-            )
-        ");
+    foreach ($barangayCoords as $name => $coord) {
+        $insertLoc->execute([
+            ":id" => $maintenance_id,
+            ":name" => $name,
+            ":lat" => $coord["lat"],
+            ":lng" => $coord["lng"]
+        ]);
+    }
+
+    /* =========================================
+       STATUS-BASED NOTIFICATION
+    ========================================= */
+
+    switch ($finalStatus) {
+        case "upcoming":
+            $statusHeader = "🟡 UPCOMING MAINTENANCE";
+            $statusNote = "Prepare for possible power interruption.";
+            break;
+
+        case "ongoing":
+            $statusHeader = "🔴 ONGOING MAINTENANCE";
+            $statusNote = "Power interruption is currently happening.";
+            break;
+
+        case "completed":
+            $statusHeader = "🟢 MAINTENANCE COMPLETED";
+            $statusNote = "Power has been restored.";
+            break;
+
+        case "cancelled":
+            $statusHeader = "⚫ MAINTENANCE CANCELLED";
+            $statusNote = "The scheduled maintenance has been cancelled.";
+            break;
+
+        default:
+            $statusHeader = "⚡ MAINTENANCE UPDATE";
+            $statusNote = "";
+            break;
+    }
+
+    /* =========================================
+       NOTIFICATIONS
+    ========================================= */
+    $usersStmt = $conn->prepare("
+        SELECT id, latitude, longitude
+        FROM users
+        WHERE role = 'user'
+    ");
+
+    $usersStmt->execute();
+    $users = $usersStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($users as $u) {
+
+        if (!$u['latitude'] || !$u['longitude']) continue;
+
+        $affected = [];
 
         foreach ($barangayCoords as $name => $coord) {
 
-            $locInsert->execute([
-                ":maintenance_id" => $maintenance_id,
-                ":barangay" => $name,
-                ":lat" => $coord["lat"],
-                ":lng" => $coord["lng"]
-            ]);
+            $distance = haversineDistance(
+                $coord['lat'],
+                $coord['lng'],
+                $u['latitude'],
+                $u['longitude']
+            );
+
+            if ($distance <= $radius) {
+                $affected[] = $name;
+            }
         }
+
+        $allBarangays = implode(", ", $barangays);
+        $affectedList = !empty($affected) ? implode(", ", $affected) : "No direct impact";
+
+        $message = "{$statusHeader}
+
+📍 Areas: {$allBarangays}
+📍 Your Area: {$affectedList}
+📅 {$maintenance_date}
+🕒 {$start_time} - {$end_time}
+
+{$statusNote}
+
+{$companyName}";
+
+        createNotification(
+            $conn,
+            [$u['id']],
+            "Maintenance " . ucfirst($finalStatus),
+            $message,
+            "maintenance_update",
+            $maintenance_id,
+            "maintenance",
+            $allBarangays
+        );
     }
 
     /* =========================================
        RESPONSE
     ========================================= */
-
     echo json_encode([
         "success" => true,
         "message" => "Maintenance updated successfully",
         "maintenance_id" => $maintenance_id,
-        "status" => $status ?? "unchanged"
+        "status" => $finalStatus
     ]);
 
 } catch (Throwable $e) {

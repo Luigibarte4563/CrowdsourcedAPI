@@ -35,25 +35,25 @@ if (!$user_id) {
 }
 
 /* =========================================
-   OPTIONAL ROLE SECURITY
-   (adjust if needed)
+   ROLE CHECK (FIXED TO MATCH YOUR SCHEMA)
 ========================================= */
 if (!in_array($role, ["electric_company", "admin"])) {
     http_response_code(403);
     echo json_encode([
         "success" => false,
-        "message" => "Forbidden: only electric_company or admin allowed"
+        "message" => "Forbidden"
     ]);
     exit;
 }
 
 /* =========================================
-   GET electric_company.id (IMPORTANT FIX)
+   GET COMPANY (FIXED: NO electric_companies TABLE)
 ========================================= */
 $stmt = $conn->prepare("
-    SELECT id 
-    FROM electric_companies 
-    WHERE user_id = :user_id
+    SELECT id, name
+    FROM users
+    WHERE id = :user_id
+    AND role = 'electric_company'
     LIMIT 1
 ");
 
@@ -119,6 +119,10 @@ try {
 
         foreach ($notifications as $n) {
 
+            if (!isset($n["user_id"], $n["title"], $n["message"])) {
+                continue;
+            }
+
             $stmt->execute([
                 ":user_id" => $n["user_id"],
                 ":title"   => $n["title"],
@@ -149,14 +153,16 @@ try {
         "company_id" => $electric_company_id
     ]);
 
-} catch (PDOException $e) {
+} catch (Throwable $e) {
 
-    $conn->rollBack();
+    if ($conn->inTransaction()) {
+        $conn->rollBack();
+    }
 
     http_response_code(500);
 
     echo json_encode([
         "success" => false,
-        "message" => $e->getMessage() // IMPORTANT for debugging
+        "message" => $e->getMessage()
     ]);
 }

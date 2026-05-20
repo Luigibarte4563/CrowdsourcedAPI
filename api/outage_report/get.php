@@ -5,18 +5,36 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-$conn = getConnection();
+try {
+    $conn = getConnection();
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection failed"
+    ]);
+    exit;
+}
 
 /* =========================================
-   JWT AUTH
+   JWT AUTH (SAFE HANDLING)
 ========================================= */
-$user = getUserFromJWT();
+try {
+    $user = getUserFromJWT();
+} catch (Exception $e) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid token"
+    ]);
+    exit;
+}
 
 if (!$user) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (invalid JWT)"
+        "message" => "Unauthorized"
     ]);
     exit;
 }
@@ -29,33 +47,9 @@ $category = $_GET['category'] ?? null;
 
 /* =========================================
    BASE QUERY
-   IMPORTANT FIX: hide cancelled reports
 ========================================= */
 $sql = "
-    SELECT 
-        id,
-        user_id,
-        report_key,
-        location_name,
-        latitude,
-        longitude,
-        category,
-        severity,
-        description,
-        image_proof,
-        affected_houses,
-        is_active,
-        hazard_type,
-        started_at,
-        status,
-        verified_by_company_id,
-        resolved_by_company_id,
-        verified_at,
-        resolved_at,
-        resolution_note,
-        maintenance_id,
-        created_at,
-        updated_at
+    SELECT *
     FROM outage_reports
     WHERE status != 'rejected'
       AND is_active = 1
@@ -63,25 +57,17 @@ $sql = "
 
 $params = [];
 
-/* =========================================
-   FILTER: STATUS
-========================================= */
-if (!empty($status)) {
+/* FILTERS */
+if ($status) {
     $sql .= " AND status = :status";
     $params[':status'] = $status;
 }
 
-/* =========================================
-   FILTER: CATEGORY
-========================================= */
-if (!empty($category)) {
+if ($category) {
     $sql .= " AND category = :category";
     $params[':category'] = $category;
 }
 
-/* =========================================
-   ORDER BY LATEST
-========================================= */
 $sql .= " ORDER BY created_at DESC";
 
 try {
@@ -93,7 +79,6 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Reports fetched successfully",
         "count" => count($reports),
         "data" => $reports
     ]);
@@ -104,6 +89,7 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => "Database query failed",
+        "error" => $e->getMessage() // TEMP DEBUG (remove later)
     ]);
 }

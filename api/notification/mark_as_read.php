@@ -12,7 +12,7 @@ $conn = getConnection();
 ========================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user["id"])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -21,23 +21,34 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user["id"];
+$user_id = (int)$user["id"];
 
 /* =========================
    INPUT
 ========================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-$notification_id = $data["id"] ?? null;
+if (!$data) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid JSON"
+    ]);
+    exit;
+}
+
+$notification_id = $data["notification_id"] ?? null;
 
 if (!$notification_id) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "ID required"
+        "message" => "notification_id is required"
     ]);
     exit;
 }
+
+$notification_id = (int)$notification_id;
 
 try {
 
@@ -52,15 +63,24 @@ try {
         ":user_id" => $user_id
     ]);
 
+    /* check if anything was updated */
+    if ($stmt->rowCount() === 0) {
+        http_response_code(404);
+        echo json_encode([
+            "success" => false,
+            "message" => "Notification not found or already updated"
+        ]);
+        exit;
+    }
+
     echo json_encode([
         "success" => true,
-        "message" => "Marked as read"
+        "message" => "Notification marked as read"
     ]);
 
 } catch (PDOException $e) {
 
     http_response_code(500);
-
     echo json_encode([
         "success" => false,
         "message" => "Database error"

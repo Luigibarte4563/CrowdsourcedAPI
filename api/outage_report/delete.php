@@ -1,22 +1,43 @@
 <?php
 
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=UTF-8");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-$conn = getConnection();
+/* =========================================
+   DB CONNECTION SAFETY
+========================================= */
+try {
+    $conn = getConnection();
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode([
+        "success" => false,
+        "message" => "Database connection failed"
+    ]);
+    exit;
+}
 
 /* =========================================
    JWT AUTH
 ========================================= */
-$user = getUserFromJWT();
+try {
+    $user = getUserFromJWT();
+} catch (Exception $e) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Invalid token"
+    ]);
+    exit;
+}
 
 if (!$user) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (invalid JWT)"
+        "message" => "Unauthorized"
     ]);
     exit;
 }
@@ -24,11 +45,13 @@ if (!$user) {
 $user_id = $user['id'];
 
 /* =========================================
-   INPUT JSON
+   INPUT JSON (SAFE)
 ========================================= */
-$data = json_decode(file_get_contents("php://input"), true);
+$rawInput = file_get_contents("php://input");
 
-if (json_last_error() !== JSON_ERROR_NONE) {
+$data = json_decode($rawInput, true);
+
+if (!is_array($data)) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -38,25 +61,24 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 }
 
 /* =========================================
-   REQUIRED INPUT
+   VALIDATION
 ========================================= */
-$id = (int)($data["id"] ?? 0);
+$id = isset($data["id"]) ? (int)$data["id"] : 0;
 
 if ($id <= 0) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Valid id required"
+        "message" => "Valid report id is required"
     ]);
     exit;
 }
 
 /* =========================================
-   SOFT DELETE (CANCEL REPORT)
+   CANCEL REPORT (SOFT DELETE)
 ========================================= */
 try {
 
-    // ensure report belongs to user AND is still active
     $stmt = $conn->prepare("
         UPDATE outage_reports
         SET 
@@ -75,9 +97,11 @@ try {
 
     if ($stmt->rowCount() === 0) {
 
+        http_response_code(404);
+
         echo json_encode([
             "success" => false,
-            "message" => "Cannot cancel this report (already resolved or not found)"
+            "message" => "Report not found or already processed"
         ]);
         exit;
     }
@@ -94,5 +118,6 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
+        // "error" => $e->getMessage() // enable only for debugging
     ]);
 }

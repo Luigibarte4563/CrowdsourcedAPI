@@ -13,7 +13,7 @@ $conn = getConnection();
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -22,23 +22,14 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-    exit;
-}
+$user_id = (int)$user['id'];
 
 /* =========================================
    INPUT
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (json_last_error() !== JSON_ERROR_NONE || !$data) {
+if (!$data) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -48,7 +39,7 @@ if (json_last_error() !== JSON_ERROR_NONE || !$data) {
 }
 
 /* REQUIRED FIELDS */
-$station_name = trim($data["station_name"] ?? "");
+$station_name  = trim($data["station_name"] ?? "");
 $location_name = trim($data["location_name"] ?? "");
 
 if ($station_name === "" || $location_name === "") {
@@ -61,34 +52,65 @@ if ($station_name === "" || $location_name === "") {
 }
 
 /* =========================================
+   ENUM VALIDATION (BASED ON SCHEMA)
+========================================= */
+$valid_station_types = [
+    "power_station",
+    "solar_station",
+    "charging_station",
+    "generator_station"
+];
+
+$valid_access_types = ["free", "paid"];
+
+$valid_availability = ["available", "busy", "offline", "maintenance"];
+
+$station_type = $data["station_type"] ?? "power_station";
+$access_type = $data["access_type"] ?? "free";
+$availability_status = $data["availability_status"] ?? "available";
+
+if (!in_array($station_type, $valid_station_types)) {
+    $station_type = "power_station";
+}
+
+if (!in_array($access_type, $valid_access_types)) {
+    $access_type = "free";
+}
+
+if (!in_array($availability_status, $valid_availability)) {
+    $availability_status = "available";
+}
+
+/* OPTIONAL FIELDS */
+$operating_hours = $data["operating_hours"] ?? null;
+$charging_type   = $data["charging_type"] ?? null;
+$description     = $data["description"] ?? null;
+$image           = $data["image"] ?? null;
+
+/* =========================================
    LIMIT: ONLY 1 POWER STATION PER USER
 ========================================= */
 try {
 
     $check = $conn->prepare("
-        SELECT COUNT(*) AS total
+        SELECT id
         FROM power_stations
         WHERE created_by = :created_by
+        LIMIT 1
     ");
 
-    $check->execute([
-        ":created_by" => $user_id
-    ]);
+    $check->execute([":created_by" => $user_id]);
 
-    $row = $check->fetch(PDO::FETCH_ASSOC);
-
-    if ((int)$row['total'] >= 1) {
-
+    if ($check->fetch(PDO::FETCH_ASSOC)) {
         http_response_code(403);
         echo json_encode([
             "success" => false,
-            "message" => "You are only allowed to create 1 power station. Please update your existing station instead."
+            "message" => "You already have a power station. Please update it instead."
         ]);
         exit;
     }
 
 } catch (PDOException $e) {
-
     http_response_code(500);
     echo json_encode([
         "success" => false,
@@ -113,18 +135,6 @@ if (!$geo["success"]) {
 
 $latitude = $geo["latitude"];
 $longitude = $geo["longitude"];
-
-/* =========================================
-   OPTIONAL FIELDS
-========================================= */
-$station_type = $data["station_type"] ?? "power_station";
-$access_type = $data["access_type"] ?? "free";
-$availability_status = $data["availability_status"] ?? "available";
-
-$operating_hours = $data["operating_hours"] ?? null;
-$charging_type = $data["charging_type"] ?? null;
-$description = $data["description"] ?? null;
-$image = $data["image"] ?? null;
 
 /* =========================================
    INSERT
@@ -184,10 +194,8 @@ try {
 } catch (PDOException $e) {
 
     http_response_code(500);
-
     echo json_encode([
         "success" => false,
         "message" => "Database error"
-        // "error" => $e->getMessage() // enable for debugging only
     ]);
 }

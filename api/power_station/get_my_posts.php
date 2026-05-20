@@ -12,7 +12,7 @@ $conn = getConnection();
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -21,7 +21,7 @@ if (!$user) {
     exit;
 }
 
-$user_id = (int)($user['id'] ?? 0);
+$user_id = (int)$user['id'];
 
 if ($user_id <= 0) {
     http_response_code(401);
@@ -59,13 +59,14 @@ try {
         ORDER BY created_at DESC
     ");
 
-    $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
-    $stmt->execute();
+    $stmt->execute([
+        ":user_id" => $user_id
+    ]);
 
     $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     /* =========================================
-       RESPONSE
+       RESPONSE (CLEAN + CONSISTENT)
     ========================================= */
     echo json_encode([
         "success" => true,
@@ -81,6 +82,5 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
-        // "error" => $e->getMessage() // enable only for debugging
     ]);
 }

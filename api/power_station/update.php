@@ -13,7 +13,7 @@ $conn = getConnection();
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -22,16 +22,7 @@ if (!$user) {
     exit;
 }
 
-$user_id = (int)($user['id'] ?? 0);
-
-if ($user_id <= 0) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-    exit;
-}
+$user_id = (int)$user['id'];
 
 /* =========================================
    INPUT
@@ -47,9 +38,9 @@ if (!$data || json_last_error() !== JSON_ERROR_NONE) {
     exit;
 }
 
-$id = $data["id"] ?? null;
+$id = (int)($data["id"] ?? 0);
 
-if (!$id) {
+if ($id <= 0) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -62,7 +53,19 @@ if (!$id) {
    GET EXISTING (SECURITY CHECK)
 ========================================= */
 $stmt = $conn->prepare("
-    SELECT * FROM power_stations
+    SELECT 
+        id,
+        station_name,
+        location_name,
+        latitude,
+        longitude,
+        station_type,
+        access_type,
+        availability_status,
+        operating_hours,
+        charging_type,
+        description
+    FROM power_stations
     WHERE id = :id AND created_by = :user_id
     LIMIT 1
 ");
@@ -84,27 +87,45 @@ if (!$station) {
 }
 
 /* =========================================
+   ENUM VALIDATION (IMPORTANT FIX)
+========================================= */
+$valid_station_types = ["power_station", "solar_station", "charging_station", "generator_station"];
+$valid_access_types = ["free", "paid"];
+$valid_status = ["available", "busy", "offline", "maintenance"];
+
+$station_type = $data["station_type"] ?? $station["station_type"];
+$access_type = $data["access_type"] ?? $station["access_type"];
+$availability_status = $data["availability_status"] ?? $station["availability_status"];
+
+if (!in_array($station_type, $valid_station_types)) {
+    $station_type = $station["station_type"];
+}
+
+if (!in_array($access_type, $valid_access_types)) {
+    $access_type = $station["access_type"];
+}
+
+if (!in_array($availability_status, $valid_status)) {
+    $availability_status = $station["availability_status"];
+}
+
+/* =========================================
    INPUT FIELDS
 ========================================= */
 $station_name = $data["station_name"] ?? $station["station_name"];
 $location_name = $data["location_name"] ?? $station["location_name"];
 
-$station_type = $data["station_type"] ?? $station["station_type"];
-$access_type = $data["access_type"] ?? $station["access_type"];
-$availability_status = $data["availability_status"] ?? $station["availability_status"];
 $operating_hours = $data["operating_hours"] ?? $station["operating_hours"];
-$charging_type = $data["charging_type"] ?? $station["charging_type"];
-$description = $data["description"] ?? $station["description"];
+$charging_type   = $data["charging_type"] ?? $station["charging_type"];
+$description     = $data["description"] ?? $station["description"];
 
 /* =========================================
-   NEW: MANUAL PIN SUPPORT (MAP UPDATE)
+   COORDINATES
 ========================================= */
 $latitude = $data["latitude"] ?? null;
 $longitude = $data["longitude"] ?? null;
 
-/* =========================================
-   IF NO COORDINATES PROVIDED → GEOCODE
-========================================= */
+/* GEOCODE IF LOCATION CHANGED */
 if ($latitude === null || $longitude === null) {
 
     if ($location_name !== $station["location_name"]) {
@@ -129,9 +150,7 @@ if ($latitude === null || $longitude === null) {
     }
 }
 
-/* =========================================
-   VALIDATE COORDINATES
-========================================= */
+/* STRICT VALIDATION */
 if (!is_numeric($latitude) || !is_numeric($longitude)) {
     http_response_code(400);
     echo json_encode([
@@ -140,6 +159,9 @@ if (!is_numeric($latitude) || !is_numeric($longitude)) {
     ]);
     exit;
 }
+
+$latitude = (float)$latitude;
+$longitude = (float)$longitude;
 
 /* =========================================
    UPDATE QUERY
@@ -159,7 +181,7 @@ try {
             charging_type = :charging_type,
             description = :description
         WHERE id = :id
-          AND created_by = :user_id
+        AND created_by = :user_id
     ");
 
     $stmt->execute([

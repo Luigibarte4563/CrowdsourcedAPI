@@ -43,12 +43,13 @@ try {
     }
 
     /* =========================================
-       COMPANY
+       COMPANY (FIXED: NO electric_companies TABLE)
     ========================================= */
     $stmt = $conn->prepare("
-        SELECT id, company_name
-        FROM electric_companies
-        WHERE user_id = :user_id
+        SELECT id, name
+        FROM users
+        WHERE id = :user_id
+        AND role = 'electric_company'
         LIMIT 1
     ");
     $stmt->execute([":user_id" => $user['id']]);
@@ -59,7 +60,7 @@ try {
     }
 
     $company_id = $company['id'];
-    $company_name = $company['company_name'];
+    $company_name = $company['name'];
 
     /* =========================================
        INPUT
@@ -82,14 +83,13 @@ try {
     }
 
     /* =========================================
-       DUPLICATE CHECK (IMPORTANT FIX)
-       Block ONLY ACTIVE schedules
+       DUPLICATE CHECK (FIXED STATUS)
     ========================================= */
     $check = $conn->prepare("
         SELECT ms.id, ms.status, ml.barangay_name
         FROM maintenance_schedules ms
         JOIN maintenance_locations ml ON ms.id = ml.maintenance_id
-        WHERE ms.status != 'done'
+        WHERE ms.status IN ('upcoming','ongoing')
         AND ms.maintenance_date = :date
     ");
     $check->execute([":date" => $maintenance_date]);
@@ -110,11 +110,11 @@ try {
     }
 
     /* =========================================
-       INSERT MAINTENANCE
+       INSERT MAINTENANCE (FIXED SCHEMA)
     ========================================= */
     $insert = $conn->prepare("
         INSERT INTO maintenance_schedules (
-            electric_company_id,
+            created_by,
             affected_barangays,
             radius,
             maintenance_date,
@@ -130,7 +130,7 @@ try {
             :start,
             :end,
             :desc,
-            'pending'
+            'upcoming'
         )
     ");
 
@@ -202,9 +202,6 @@ try {
 
     $notified = 0;
 
-    /* =========================================
-       NOTIFICATION LOGIC
-    ========================================= */
     foreach ($users as $u) {
 
         if (!$u['latitude'] || !$u['longitude']) continue;

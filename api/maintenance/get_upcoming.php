@@ -5,14 +5,10 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
-
 $conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 try {
-
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     /* =========================================
        JWT AUTH
@@ -35,30 +31,19 @@ try {
     $now   = date("H:i:s");
 
     /* =========================================
-       TOTAL UPCOMING MAINTENANCE
+       FIXED STATUS LOGIC (BASED ON YOUR SCHEMA)
+       upcoming + ongoing only (NOT completed/cancelled)
     ========================================= */
     $stmt = $conn->prepare("
         SELECT COUNT(*) as total
         FROM maintenance_schedules
-        WHERE
-            maintenance_date > :today
-
-            OR (
-                maintenance_date = :today
-                AND end_time >= :now_time
-            )
+        WHERE status IN ('upcoming','ongoing')
     ");
 
-    $stmt->execute([
-        ":today"    => $today,
-        ":now_time" => $now
-    ]);
+    $stmt->execute();
 
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    /* =========================================
-       RESPONSE
-    ========================================= */
     echo json_encode([
 
         "success" => true,
@@ -74,10 +59,7 @@ try {
 
     http_response_code(500);
 
-    error_log(
-        "Upcoming Maintenance Count Error: " .
-        $e->getMessage()
-    );
+    error_log("Upcoming Maintenance Count Error: " . $e->getMessage());
 
     echo json_encode([
         "success" => false,

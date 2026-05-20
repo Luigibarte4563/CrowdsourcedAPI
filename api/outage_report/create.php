@@ -18,7 +18,7 @@ if (!$user) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
-        "message" => "Unauthorized (invalid JWT)"
+        "message" => "Unauthorized"
     ]);
     exit;
 }
@@ -26,10 +26,18 @@ if (!$user) {
 $user_id = $user['id'];
 
 /* =========================================
-   INPUT JSON
+   SAFE INPUT PARSING (FIXED)
 ========================================= */
-$data = json_decode(file_get_contents("php://input"), true);
+$rawInput = file_get_contents("php://input");
+$data = json_decode($rawInput, true);
 
+if (!is_array($data)) {
+    $data = $_POST; // fallback for form-data
+}
+
+/* =========================================
+   VALIDATION
+========================================= */
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
@@ -43,31 +51,22 @@ if ($location_name === "" || $description === "") {
 }
 
 /* =========================================
-   CHECK ACTIVE REPORT (ANTI-SPAM LOGIC)
+   ANTI-SPAM CHECK
 ========================================= */
 try {
-
     $check = $conn->prepare("
-        SELECT id 
-        FROM outage_reports 
-        WHERE user_id = :user_id
+        SELECT id FROM outage_reports 
+        WHERE user_id = ? 
         AND status IN ('active','under_review','verified')
         LIMIT 1
     ");
+    $check->execute([$user_id]);
 
-    $check->execute([
-        ":user_id" => $user_id
-    ]);
-
-    $existing = $check->fetch(PDO::FETCH_ASSOC);
-
-    if ($existing) {
-
+    if ($check->fetch()) {
         http_response_code(403);
-
         echo json_encode([
             "success" => false,
-            "message" => "You already have an active outage report. Wait until it is resolved."
+            "message" => "You already have an active report"
         ]);
         exit;
     }
@@ -76,21 +75,22 @@ try {
     http_response_code(500);
     echo json_encode([
         "success" => false,
-        "message" => "Validation error"
+        "message" => "Anti-spam check failed",
+        "debug" => $e->getMessage()
     ]);
     exit;
 }
 
 /* =========================================
-   GET COORDINATES
+   GET COORDINATES (SAFE)
 ========================================= */
 $geo = getCoordinates($location_name);
 
-if (!$geo["success"]) {
+if (!$geo || !isset($geo["success"]) || !$geo["success"]) {
     http_response_code(404);
     echo json_encode([
         "success" => false,
-        "message" => $geo["message"]
+        "message" => $geo["message"] ?? "Geolocation failed"
     ]);
     exit;
 }
@@ -99,10 +99,9 @@ $latitude  = $geo["latitude"];
 $longitude = $geo["longitude"];
 
 /* =========================================
-   BARANGAY CHECK
+   DISTANCE FUNCTION (MOVED UP FIX)
 ========================================= */
 function haversineDistance($lat1, $lon1, $lat2, $lon2) {
-
     $earthRadius = 6371000;
 
     $dLat = deg2rad($lat2 - $lat1);
@@ -117,6 +116,9 @@ function haversineDistance($lat1, $lon1, $lat2, $lon2) {
     return $earthRadius * $c;
 }
 
+/* =========================================
+   BARANGAYS
+========================================= */
 $barangays = [
     ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
     ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
@@ -131,26 +133,22 @@ $barangays = [
     ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1200]
 ];
 
-function isInside($lat, $lng, $barangays) {
 
+function findBarangay($lat, $lng, $barangays) {
     foreach ($barangays as $b) {
         $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
-
-        if ($distance <= $b["radius"]) {
-            return $b["name"];
-        }
+        if ($distance <= $b["radius"]) return $b["name"];
     }
-
-    return false;
+    return null;
 }
 
-$matched_barangay = isInside($latitude, $longitude, $barangays);
+$matched_barangay = findBarangay($latitude, $longitude, $barangays);
 
 if (!$matched_barangay) {
     http_response_code(403);
     echo json_encode([
         "success" => false,
-        "message" => "Location is outside Dagupan coverage"
+        "message" => "Outside coverage area"
     ]);
     exit;
 }
@@ -166,7 +164,7 @@ $hazard_type     = $data["hazard_type"] ?? "none";
 $started_at      = $data["started_at"] ?? null;
 
 /* =========================================
-   INSERT REPORT
+   INSERT REPORT (FIXED SAFE EXECUTION)
 ========================================= */
 try {
 
@@ -186,51 +184,36 @@ try {
             hazard_type,
             started_at,
             status
-        ) VALUES (
-            :user_id,
-            :report_key,
-            :location_name,
-            :latitude,
-            :longitude,
-            :category,
-            :severity,
-            :description,
-            :image_proof,
-            :affected_houses,
-            1,
-            :hazard_type,
-            :started_at,
-            'active'
-        )
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'active')
     ");
 
     $stmt->execute([
-        ":user_id" => $user_id,
-        ":report_key" => uniqid("OR-"),
-        ":location_name" => $location_name,
-        ":latitude" => $latitude,
-        ":longitude" => $longitude,
-        ":category" => $category,
-        ":severity" => $severity,
-        ":description" => $description,
-        ":image_proof" => $image_proof,
-        ":affected_houses" => $affected_houses,
-        ":hazard_type" => $hazard_type,
-        ":started_at" => $started_at
+        $user_id,
+        uniqid("OR-"),
+        $location_name,
+        $latitude,
+        $longitude,
+        $category,
+        $severity,
+        $description,
+        $image_proof,
+        $affected_houses,
+        $hazard_type,
+        $started_at
     ]);
 
     echo json_encode([
         "success" => true,
-        "message" => "Outage report created successfully",
+        "message" => "Report created",
         "barangay" => $matched_barangay
     ]);
 
 } catch (PDOException $e) {
-
     http_response_code(500);
 
     echo json_encode([
         "success" => false,
-        "message" => "Database error"
+        "message" => "Database insert failed",
+        "debug" => $e->getMessage()
     ]);
 }

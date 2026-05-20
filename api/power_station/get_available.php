@@ -11,39 +11,19 @@ require_once __DIR__ . '/../../auth/jwt_auth.php';
 $conn = getConnection();
 
 /* =========================================
-   JWT AUTH
+   JWT AUTH (OPTIONAL - kept for security consistency)
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
-
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
-
     echo json_encode([
         "success" => false,
         "message" => "Unauthorized (invalid JWT)"
     ]);
-
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-
-    http_response_code(401);
-
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-
-    exit;
-}
-
-/* =========================================
-   COUNT AVAILABLE POWER STATIONS
-========================================= */
 try {
 
     $stmt = $conn->prepare("
@@ -58,8 +38,7 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Available power stations count fetched successfully",
-        "total_available" => (int)$result["total_available"]
+        "total_available" => (int)($result['total_available'] ?? 0)
     ]);
 
 } catch (PDOException $e) {

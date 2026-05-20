@@ -20,7 +20,7 @@ try {
     }
 
     /* =========================================
-       INPUT (SAFE + FALLBACK)
+       INPUT
     ========================================= */
     $raw = file_get_contents("php://input");
     $data = json_decode($raw, true);
@@ -35,22 +35,21 @@ try {
         http_response_code(400);
         echo json_encode([
             "success" => false,
-            "message" => "Maintenance ID is required",
-            "debug_raw" => $raw
+            "message" => "Maintenance ID is required"
         ]);
         exit;
     }
 
     /* =========================================
-       VERIFY OWNERSHIP
+       VERIFY OWNERSHIP (FIXED: NO electric_companies TABLE)
     ========================================= */
     $stmt = $conn->prepare("
         SELECT ms.id
         FROM maintenance_schedules ms
-        JOIN electric_companies ec
-            ON ec.id = ms.electric_company_id
+        JOIN users u ON u.id = ms.created_by
         WHERE ms.id = :id
-        AND ec.user_id = :user_id
+        AND u.id = :user_id
+        AND u.role = 'electric_company'
         LIMIT 1
     ");
 
@@ -66,15 +65,14 @@ try {
     }
 
     /* =========================================
-       DELETE DEPENDENT DATA
+       DELETE DEPENDENT DATA (SAFE ORDER)
     ========================================= */
+
     $conn->prepare("DELETE FROM notifications WHERE maintenance_id = :id")
         ->execute([":id" => $maintenance_id]);
 
-    /* OPTIONAL (only if table exists)
     $conn->prepare("DELETE FROM maintenance_locations WHERE maintenance_id = :id")
         ->execute([":id" => $maintenance_id]);
-    */
 
     $conn->prepare("DELETE FROM maintenance_schedules WHERE id = :id")
         ->execute([":id" => $maintenance_id]);

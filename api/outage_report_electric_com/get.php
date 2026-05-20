@@ -3,7 +3,7 @@
 header("Content-Type: application/json; charset=UTF-8");
 
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 
 try {
 
@@ -25,16 +25,16 @@ try {
         exit;
     }
 
-    /* ================= COMPANY ================= */
+    /* ================= OPTIONAL: VERIFY COMPANY EXISTS ================= */
     $stmt = $conn->prepare("
-        SELECT id
-        FROM electric_companies
-        WHERE user_id = :user_id
+        SELECT id 
+        FROM electric_companies 
+        WHERE user_id = :user_id 
         LIMIT 1
     ");
 
     $stmt->execute([
-        ":user_id" => $user['id'] ?? 0
+        ":user_id" => $user['id']
     ]);
 
     $company = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -43,17 +43,16 @@ try {
         http_response_code(403);
         echo json_encode([
             "success" => false,
-            "message" => "Company not found"
+            "message" => "Electric company profile not found"
         ]);
         exit;
     }
 
-    $company_id = (int)$company['id'];
-
-    /* ================= OUTAGE DATA (FIXED) ================= */
+    /* ================= OUTAGE REPORTS ================= */
     $stmt = $conn->prepare("
         SELECT 
             id,
+            user_id,
             location_name,
             latitude,
             longitude,
@@ -72,13 +71,14 @@ try {
             created_at,
             updated_at
         FROM outage_reports
+        WHERE status != 'rejected'
         ORDER BY created_at DESC
     ");
 
     $stmt->execute();
+
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* ================= RESPONSE ================= */
     echo json_encode([
         "success" => true,
         "count" => count($rows),
@@ -91,7 +91,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Server error",
-        "error" => $e->getMessage()
+        "message" => "Server error"
     ]);
 }

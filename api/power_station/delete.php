@@ -12,7 +12,7 @@ $conn = getConnection();
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -21,38 +21,30 @@ if (!$user) {
     exit;
 }
 
-$user_id = $user['id'] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid user token"
-    ]);
-    exit;
-}
+$user_id = (int)$user['id'];
 
 /* =========================================
    INPUT
 ========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (json_last_error() !== JSON_ERROR_NONE) {
+if (!$data) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Invalid JSON"
+        "message" => "Invalid JSON body"
     ]);
     exit;
 }
 
-$id = isset($data["id"]) ? (int)$data["id"] : 0;
+/* USE CONSISTENT NAME */
+$station_id = isset($data["station_id"]) ? (int)$data["station_id"] : 0;
 
-if ($id <= 0) {
+if ($station_id <= 0) {
     http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Valid station ID required"
+        "message" => "station_id is required"
     ]);
     exit;
 }
@@ -69,7 +61,7 @@ try {
     ");
 
     $stmt->execute([
-        ":id" => $id,
+        ":id" => $station_id,
         ":user_id" => $user_id
     ]);
 
@@ -90,10 +82,8 @@ try {
 } catch (PDOException $e) {
 
     http_response_code(500);
-
     echo json_encode([
         "success" => false,
         "message" => "Database error"
-        // "error" => $e->getMessage() // enable only for debugging
     ]);
 }

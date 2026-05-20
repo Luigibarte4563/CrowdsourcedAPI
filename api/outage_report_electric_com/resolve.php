@@ -3,7 +3,7 @@
 header("Content-Type: application/json; charset=UTF-8");
 
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 
 try {
 
@@ -16,20 +16,11 @@ try {
     /* ================= AUTH ================= */
     $user = getUserFromJWT();
 
-    if (!$user) {
-        http_response_code(401);
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
-        exit;
-    }
-
-    if (($user['role'] ?? '') !== 'electric_company') {
+    if (!$user || ($user['role'] ?? '') !== 'electric_company') {
         http_response_code(403);
         echo json_encode([
             "success" => false,
-            "message" => "Access denied: Electric company only"
+            "message" => "Access denied"
         ]);
         exit;
     }
@@ -37,28 +28,30 @@ try {
     /* ================= INPUT ================= */
     $data = json_decode(file_get_contents("php://input"), true);
 
-    if (json_last_error() !== JSON_ERROR_NONE) {
+    if (!$data || json_last_error() !== JSON_ERROR_NONE) {
+        http_response_code(400);
         echo json_encode([
             "success" => false,
-            "message" => "Invalid JSON"
+            "message" => "Invalid JSON input"
         ]);
         exit;
     }
 
-    $id = $data["id"] ?? null;
+    $id = (int)($data["id"] ?? 0);
 
-    if (!$id) {
+    if ($id <= 0) {
+        http_response_code(400);
         echo json_encode([
             "success" => false,
-            "message" => "Report ID is required"
+            "message" => "Valid report ID required"
         ]);
         exit;
     }
 
-    /* ================= GET REPORT ================= */
+    /* ================= VERIFY REPORT ================= */
     $stmt = $conn->prepare("
-        SELECT id, status, resolved_at
-        FROM outage_reports
+        SELECT id, status 
+        FROM outage_reports 
         WHERE id = :id
         LIMIT 1
     ");
@@ -67,6 +60,7 @@ try {
     $report = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$report) {
+        http_response_code(404);
         echo json_encode([
             "success" => false,
             "message" => "Report not found"
@@ -74,11 +68,19 @@ try {
         exit;
     }
 
-    /* ================= ALREADY RESOLVED ================= */
+    /* ================= STATUS CHECK ================= */
     if ($report['status'] === 'resolved') {
         echo json_encode([
             "success" => false,
-            "message" => "Already resolved"
+            "message" => "Report already resolved"
+        ]);
+        exit;
+    }
+
+    if ($report['status'] === 'rejected') {
+        echo json_encode([
+            "success" => false,
+            "message" => "Cannot resolve rejected report"
         ]);
         exit;
     }
@@ -86,32 +88,23 @@ try {
     /* ================= UPDATE ================= */
     $resolvedAt = date("Y-m-d H:i:s");
 
-    $stmt = $conn->prepare("
+    $update = $conn->prepare("
         UPDATE outage_reports
-        SET status = 'resolved',
+        SET 
+            status = 'resolved',
             is_active = 0,
             resolved_at = :resolved_at
         WHERE id = :id
     ");
 
-    $stmt->execute([
+    $update->execute([
         ":id" => $id,
         ":resolved_at" => $resolvedAt
     ]);
 
-    /* ================= CHECK UPDATE ================= */
-    if ($stmt->rowCount() === 0) {
-        echo json_encode([
-            "success" => false,
-            "message" => "No changes made"
-        ]);
-        exit;
-    }
-
-    /* ================= SUCCESS ================= */
     echo json_encode([
         "success" => true,
-        "message" => "Outage marked as RESOLVED",
+        "message" => "Report marked as resolved",
         "data" => [
             "report_id" => $id,
             "status" => "resolved",
@@ -125,7 +118,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Server error",
-        "error" => $e->getMessage()
+        "message" => "Server error"
     ]);
 }

@@ -43,7 +43,7 @@ try {
     $maintenance_id  = $_GET['maintenance_id'] ?? null;
 
     /* =========================================
-       BASE QUERY
+       BASE QUERY (FIXED: removed unknown fields safety)
     ========================================= */
     $sql = "
         SELECT
@@ -65,48 +65,37 @@ try {
         ":user_id" => $user_id
     ];
 
-    /* =========================================
-       FILTER: UNREAD
-    ========================================= */
     if ($onlyUnread === 1) {
         $sql .= " AND is_read = 0 ";
     }
 
-    /* =========================================
-       FILTER: TYPE
-    ========================================= */
     if (!empty($type)) {
         $sql .= " AND type = :type ";
         $params[":type"] = $type;
     }
 
-    /* =========================================
-       FILTER: SOURCE TYPE
-    ========================================= */
     if (!empty($source_type)) {
         $sql .= " AND source_type = :source_type ";
         $params[":source_type"] = $source_type;
     }
 
-    /* =========================================
-       FILTER: MAINTENANCE ID
-    ========================================= */
     if (!empty($maintenance_id)) {
         $sql .= " AND maintenance_id = :maintenance_id ";
         $params[":maintenance_id"] = $maintenance_id;
     }
 
-    /* =========================================
-       ORDER + PAGINATION
-    ========================================= */
     $sql .= " ORDER BY created_at DESC ";
-    $sql .= " LIMIT $limit OFFSET $offset ";
+    $sql .= " LIMIT :limit OFFSET :offset ";
 
     $stmt = $conn->prepare($sql);
 
     foreach ($params as $key => $value) {
         $stmt->bindValue($key, $value);
     }
+
+    /* FIX: LIMIT/OFFSET must be int bound */
+    $stmt->bindValue(":limit", $limit, PDO::PARAM_INT);
+    $stmt->bindValue(":offset", $offset, PDO::PARAM_INT);
 
     $stmt->execute();
 
@@ -128,9 +117,6 @@ try {
 
     $unread = $unreadStmt->fetch(PDO::FETCH_ASSOC);
 
-    /* =========================================
-       RESPONSE (CLEAN FOR FRONTEND)
-    ========================================= */
     echo json_encode([
         "success" => true,
         "total" => count($notifications),
@@ -143,8 +129,6 @@ try {
 } catch (Throwable $e) {
 
     http_response_code(500);
-
-    error_log("Get Notifications Error: " . $e->getMessage());
 
     echo json_encode([
         "success" => false,

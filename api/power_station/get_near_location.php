@@ -12,7 +12,7 @@ $conn = getConnection();
 ========================================= */
 $user = getUserFromJWT();
 
-if (!$user) {
+if (!$user || !isset($user['id'])) {
     http_response_code(401);
     echo json_encode([
         "success" => false,
@@ -21,19 +21,10 @@ if (!$user) {
     exit;
 }
 
-$user_id = (int)($user['id'] ?? 0);
-
-if ($user_id <= 0) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid token payload"
-    ]);
-    exit;
-}
+$user_id = (int)$user['id'];
 
 /* =========================================
-   GET USER LOCATION (OPTIONAL)
+   GET USER LOCATION
 ========================================= */
 try {
 
@@ -58,23 +49,34 @@ try {
 }
 
 /* =========================================
-   RADIUS (OPTIONAL FILTER)
+   RADIUS VALIDATION
 ========================================= */
 $radius = isset($_GET['radius']) ? (int)$_GET['radius'] : null;
 
+if ($radius !== null && $radius <= 0) {
+    $radius = null;
+}
+
+/* DEFAULT RADIUS (optional safety)
+$radius = $radius ?? 5000; // 5km default
+*/
+
 /* =========================================
-   BASE QUERY: ALL AVAILABLE STATIONS
+   MAIN LOGIC
 ========================================= */
 try {
 
-    $hasLocation = !empty($userData['latitude']) && !empty($userData['longitude']);
+    $hasLocation =
+        isset($userData['latitude'], $userData['longitude']) &&
+        $userData['latitude'] !== null &&
+        $userData['longitude'] !== null;
 
     if ($hasLocation) {
 
         $lat = (float)$userData['latitude'];
         $lng = (float)$userData['longitude'];
 
-        $stmt = $conn->prepare("
+        $sql = "
             SELECT 
                 id,
                 created_by,
@@ -94,17 +96,21 @@ try {
 
                 (
                     6371000 * ACOS(
+                        LEAST(1,
                         COS(RADIANS(:lat)) *
                         COS(RADIANS(latitude)) *
                         COS(RADIANS(longitude) - RADIANS(:lng)) +
                         SIN(RADIANS(:lat)) *
                         SIN(RADIANS(latitude))
+                        )
                     )
                 ) AS distance
 
             FROM power_stations
             WHERE availability_status = 'available'
-        ");
+        ";
+
+        $stmt = $conn->prepare($sql);
 
         $stmt->execute([
             ":lat" => $lat,
@@ -113,19 +119,20 @@ try {
 
         $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        /* APPLY RADIUS FILTER ONLY IF PROVIDED */
-        if ($radius) {
+        /* FILTER BY RADIUS (SAFE) */
+        if ($radius !== null) {
             $stations = array_values(array_filter($stations, function ($s) use ($radius) {
                 return isset($s['distance']) && $s['distance'] <= $radius;
             }));
         }
 
         /* SORT BY DISTANCE */
-        usort($stations, fn($a, $b) => $a['distance'] <=> $b['distance']);
+        usort($stations, function ($a, $b) {
+            return ($a['distance'] ?? 0) <=> ($b['distance'] ?? 0);
+        });
 
     } else {
 
-        /* NO LOCATION → RETURN ALL AVAILABLE */
         $stmt = $conn->prepare("
             SELECT 
                 id,
@@ -158,7 +165,6 @@ try {
     ========================================= */
     echo json_encode([
         "success" => true,
-        "message" => "Available power stations fetched successfully",
         "count" => count($stations),
         "has_location" => $hasLocation,
         "radius" => $radius,
