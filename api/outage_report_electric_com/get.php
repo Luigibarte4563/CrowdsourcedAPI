@@ -13,7 +13,9 @@ try {
     $conn = getConnection();
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    /* ================= AUTH ================= */
+    /* =========================================
+       AUTH
+    ========================================= */
     $user = getUserFromJWT();
 
     if (!$user || ($user['role'] ?? '') !== 'electric_company') {
@@ -25,31 +27,17 @@ try {
         exit;
     }
 
-    /* ================= OPTIONAL: VERIFY COMPANY EXISTS ================= */
-    $stmt = $conn->prepare("
-        SELECT id 
-        FROM electric_companies 
-        WHERE user_id = :user_id 
-        LIMIT 1
-    ");
+    /* =========================================
+       OPTIONAL FILTERS
+    ========================================= */
+    $status = $_GET['status'] ?? null;
+    $severity = $_GET['severity'] ?? null;
+    $active = isset($_GET['active']) ? (int)$_GET['active'] : null;
 
-    $stmt->execute([
-        ":user_id" => $user['id']
-    ]);
-
-    $company = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$company) {
-        http_response_code(403);
-        echo json_encode([
-            "success" => false,
-            "message" => "Electric company profile not found"
-        ]);
-        exit;
-    }
-
-    /* ================= OUTAGE REPORTS ================= */
-    $stmt = $conn->prepare("
+    /* =========================================
+       QUERY
+    ========================================= */
+    $sql = "
         SELECT 
             id,
             user_id,
@@ -71,14 +59,51 @@ try {
             created_at,
             updated_at
         FROM outage_reports
-        WHERE status != 'rejected'
-        ORDER BY created_at DESC
-    ");
+        WHERE 1=1
+    ";
 
-    $stmt->execute();
+    $params = [];
+
+    /* =========================================
+       FILTER STATUS
+    ========================================= */
+    if (!empty($status)) {
+        $sql .= " AND status = :status";
+        $params[':status'] = $status;
+    }
+
+    /* =========================================
+       FILTER SEVERITY
+    ========================================= */
+    if (!empty($severity)) {
+        $sql .= " AND severity = :severity";
+        $params[':severity'] = $severity;
+    }
+
+    /* =========================================
+       FILTER ACTIVE
+    ========================================= */
+    if ($active !== null) {
+        $sql .= " AND is_active = :active";
+        $params[':active'] = $active;
+    }
+
+    /* =========================================
+       ORDER
+    ========================================= */
+    $sql .= " ORDER BY created_at DESC";
+
+    /* =========================================
+       EXECUTE
+    ========================================= */
+    $stmt = $conn->prepare($sql);
+    $stmt->execute($params);
 
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    /* =========================================
+       RESPONSE
+    ========================================= */
     echo json_encode([
         "success" => true,
         "count" => count($rows),
