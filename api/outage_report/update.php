@@ -31,7 +31,7 @@ try {
     /* ================= INPUT ================= */
     $data = json_decode(file_get_contents("php://input"), true);
 
-    if (!$data) {
+    if (!is_array($data)) {
         http_response_code(400);
         echo json_encode([
             "success" => false,
@@ -83,28 +83,106 @@ try {
     $hazard_type     = $data["hazard_type"] ?? $report["hazard_type"];
     $started_at      = $data["started_at"] ?? $report["started_at"];
 
-    $latitude  = $report["latitude"];
-    $longitude = $report["longitude"];
+    $latitude  = (float)$report["latitude"];
+    $longitude = (float)$report["longitude"];
 
     /* ================= GEO UPDATE ================= */
     if (!empty($data["location_name"]) && $data["location_name"] !== $report["location_name"]) {
 
         $geo = getCoordinates($location_name);
 
-        if (!$geo["success"]) {
+        if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
             http_response_code(400);
             echo json_encode([
                 "success" => false,
-                "message" => "Invalid location"
+                "message" => "Invalid location (geocoding failed)"
             ]);
             exit;
         }
 
-        $latitude = $geo["latitude"];
-        $longitude = $geo["longitude"];
+        $latitude = (float)$geo["latitude"];
+        $longitude = (float)$geo["longitude"];
     }
 
-    /* ================= UPDATE ================= */
+    /* ================= BARANGAY VALIDATION (FIXED LOGIC) ================= */
+    function haversineDistance($lat1, $lon1, $lat2, $lon2) {
+        $earthRadius = 6371000;
+
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+
+        $a = sin($dLat/2) ** 2 +
+             cos(deg2rad($lat1)) *
+             cos(deg2rad($lat2)) *
+             sin($dLon/2) ** 2;
+
+        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
+
+        return $earthRadius * $c;
+    }
+
+    $barangays = [
+        ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
+        ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
+        ["name"=>"Bonuan Binloc","lat"=>16.0620,"lng"=>120.3100,"radius"=>4000],
+        ["name"=>"Lucao","lat"=>16.0435,"lng"=>120.3310,"radius"=>2500],
+        ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>2000],
+        ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>2000],
+        ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>2000],
+        ["name"=>"Herrero-Perez","lat"=>16.0455,"lng"=>120.3380,"radius"=>2000],
+        ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>2500],
+        ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1500],
+        ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1500]
+    ];
+
+    function findBarangay($lat, $lng, $barangays, $location_name = "") {
+
+        $input = strtolower($location_name);
+
+        // 🔥 FIX BINLOC ISSUE (keyword override)
+        if (str_contains($input, "binloc")) {
+            return "Bonuan Binloc";
+        }
+        if (str_contains($input, "bonuan")) {
+            return "Bonuan Gueset";
+        }
+        if (str_contains($input, "lucao")) {
+            return "Lucao";
+        }
+
+        $bestMatch = null;
+        $bestDistance = PHP_FLOAT_MAX;
+
+        foreach ($barangays as $b) {
+            $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
+
+            if ($distance <= $b["radius"] && $distance < $bestDistance) {
+                $bestDistance = $distance;
+                $bestMatch = $b["name"];
+            }
+        }
+
+        return $bestMatch;
+    }
+
+    $matched_barangay = findBarangay($latitude, $longitude, $barangays, $location_name);
+
+    /* ================= FINAL COVERAGE CHECK ================= */
+    if (!$matched_barangay) {
+        http_response_code(403);
+        echo json_encode([
+            "success" => false,
+            "message" => "Outside coverage area (update blocked)",
+            "debug" => [
+                "lat" => $latitude,
+                "lng" => $longitude,
+                "input" => $location_name
+            ]
+        ]);
+        exit;
+    }
+
+    /* ================= UPDATE QUERY ================= */
     $stmt = $conn->prepare("
         UPDATE outage_reports SET
             location_name = :location_name,
@@ -137,7 +215,8 @@ try {
 
     echo json_encode([
         "success" => true,
-        "message" => "Report updated successfully"
+        "message" => "Report updated successfully",
+        "barangay" => $matched_barangay
     ]);
 
 } catch (Throwable $e) {
@@ -146,7 +225,6 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Server error",
-        "error" => $e->getMessage()
+        "message" => "Server error"
     ]);
 }
