@@ -1,12 +1,51 @@
 <?php
 
 header("Content-Type: application/json; charset=UTF-8");
+header("Accept: application/json");
 
+/* =========================================
+   INPUT HANDLING (ROBUST & SAFE)
+========================================= */
+$rawInput = file_get_contents("php://input");
+$data = json_decode($rawInput, true);
+
+/* fallback for form-data or empty request */
+if (!is_array($data)) {
+    if (!empty($_POST)) {
+        $data = $_POST;
+    } else {
+        http_response_code(400);
+        echo json_encode([
+            "success" => false,
+            "message" => "Invalid JSON body",
+            "debug" => $rawInput
+        ]);
+        exit;
+    }
+}
+
+/* =========================================
+   VALIDATION
+========================================= */
+$id = isset($data["id"]) ? (int)$data["id"] : 0;
+
+if ($id <= 0) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "Valid report id is required"
+    ]);
+    exit;
+}
+
+/* =========================================
+   LOAD DEPENDENCIES (AFTER INPUT)
+========================================= */
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 /* =========================================
-   DB CONNECTION SAFETY
+   DB CONNECTION
 ========================================= */
 try {
     $conn = getConnection();
@@ -45,37 +84,7 @@ if (!$user) {
 $user_id = $user['id'];
 
 /* =========================================
-   INPUT JSON (SAFE)
-========================================= */
-$rawInput = file_get_contents("php://input");
-
-$data = json_decode($rawInput, true);
-
-if (!is_array($data)) {
-    http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid JSON body"
-    ]);
-    exit;
-}
-
-/* =========================================
-   VALIDATION
-========================================= */
-$id = isset($data["id"]) ? (int)$data["id"] : 0;
-
-if ($id <= 0) {
-    http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "Valid report id is required"
-    ]);
-    exit;
-}
-
-/* =========================================
-   CANCEL REPORT (SOFT DELETE)
+   SOFT DELETE QUERY
 ========================================= */
 try {
 
@@ -118,6 +127,6 @@ try {
     echo json_encode([
         "success" => false,
         "message" => "Database error"
-        // "error" => $e->getMessage() // enable only for debugging
+        // "error" => $e->getMessage() // enable for debugging only
     ]);
 }
