@@ -3,14 +3,14 @@
 header("Content-Type: application/json; charset=UTF-8");
 
 error_reporting(E_ALL);
-ini_set('display_errors', 0); // prevent HTML breaking JSON
+ini_set('display_errors', 0);
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 try {
 
-    /* ================= DB CONNECTION ================= */
+    /* ================= DATABASE CONNECTION ================= */
     $conn = getConnection();
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
@@ -20,55 +20,67 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database connection failed"
+        "message" => "Database connection failed",
+        "error" => $e->getMessage()
     ]);
+
     exit;
 }
 
-/* ================= AUTH ================= */
+/* ================= AUTH VALIDATION ================= */
 try {
+
     $user = getUserFromJWT();
+
+    if (!$user || !isset($user['id'])) {
+
+        http_response_code(401);
+
+        echo json_encode([
+            "success" => false,
+            "message" => "Unauthorized"
+        ]);
+
+        exit;
+    }
+
 } catch (Exception $e) {
+
     http_response_code(401);
 
     echo json_encode([
         "success" => false,
-        "message" => "Invalid token"
+        "message" => "Invalid token",
+        "error" => $e->getMessage()
     ]);
-    exit;
-}
 
-if (!$user || !isset($user['id'])) {
-    http_response_code(401);
-
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized"
-    ]);
     exit;
 }
 
 try {
 
-    /* ================= COUNT RESOLVED REPORTS ================= */
-    $stmt = $conn->prepare("
+    /* ================= COUNT RESOLVED OUTAGES ================= */
+    $sql = "
         SELECT COUNT(*) AS total_resolved
         FROM outage_reports
-        WHERE status = 'resolved'
-          AND is_active = 1
-    ");
+        WHERE LOWER(TRIM(status)) = 'resolved'
+    ";
+
+    $stmt = $conn->prepare($sql);
 
     $stmt->execute();
 
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $count = $result['total_resolved'] ?? 0;
+    $totalResolved = isset($result['total_resolved'])
+        ? (int)$result['total_resolved']
+        : 0;
 
-    /* ================= RESPONSE ================= */
+    /* ================= SUCCESS RESPONSE ================= */
     echo json_encode([
         "success" => true,
-        "message" => "Resolved reports count fetched successfully",
-        "total_resolved" => (int)$count
+        "message" => "Resolved outage count fetched successfully",
+        "total_resolved" => $totalResolved
     ]);
 
 } catch (PDOException $e) {
@@ -77,7 +89,7 @@ try {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database query failed"
-        // "error" => $e->getMessage() // enable only for debugging
+        "message" => "Database query failed",
+        "error" => $e->getMessage()
     ]);
 }
