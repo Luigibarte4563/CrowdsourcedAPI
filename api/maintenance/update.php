@@ -8,6 +8,7 @@ ini_set('display_errors', 1);
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
+require_once __DIR__ . '/../services/create_notification.php'; // ← ADDED
 
 /* =========================================
    DATABASE
@@ -53,6 +54,20 @@ try {
     }
 
     /* =========================================
+       COMPANY NAME (for notification sender label)
+    ========================================= */
+    $companyStmt = $conn->prepare("
+        SELECT name
+        FROM users
+        WHERE id = :user_id
+        AND role = 'electric_company'
+        LIMIT 1
+    ");
+    $companyStmt->execute([":user_id" => $user['id']]);
+    $company = $companyStmt->fetch(PDO::FETCH_ASSOC);
+    $company_name = $company['name'] ?? 'Electric Company';
+
+    /* =========================================
        GET INPUT
     ========================================= */
     $rawInput = file_get_contents("php://input");
@@ -95,10 +110,6 @@ try {
     ========================================= */
     $barangays = $data['barangays'] ?? null;
 
-    /*
-        KEEP EXISTING BARANGAYS
-        IF FRONTEND DOES NOT SEND THEM
-    */
     if ($barangays === null) {
 
         $oldStmt = $conn->prepare("
@@ -153,8 +164,6 @@ try {
 
     /* =========================================
        CHECK EXISTING RECORD
-       REMOVED created_by CHECK
-       TO PREVENT SQL COLUMN ERROR
     ========================================= */
     $checkStmt = $conn->prepare("
         SELECT id
@@ -217,8 +226,6 @@ try {
 
     /* =========================================
        UPDATE MAINTENANCE
-       REMOVED updated_at
-       TO PREVENT COLUMN ERROR
     ========================================= */
     $updateStmt = $conn->prepare("
         UPDATE maintenance_schedules
@@ -259,11 +266,6 @@ try {
     ========================================= */
     $barangayCoords = [];
 
-    /*
-        CHANGE THESE COLUMN NAMES
-        IF YOUR TABLE USES:
-        barangay / lat / lng
-    */
     $insertLocStmt = $conn->prepare("
         INSERT INTO maintenance_locations
         (
@@ -287,9 +289,6 @@ try {
             continue;
         }
 
-        /*
-            SAFE COORDINATE FETCH
-        */
         try {
 
             if (!function_exists('getCoordinates')) {
@@ -336,9 +335,201 @@ try {
     }
 
     /* =========================================
+       NOTIFICATIONS — STATUS-AWARE
+    ========================================= */
+    $notified = 0;
+
+    // Only notify if we have coordinate data to work with
+    if (!empty($barangayCoords)) {
+
+        $userStmt = $conn->prepare("
+            SELECT id, latitude, longitude
+            FROM users
+            WHERE role = 'user'
+        ");
+        $userStmt->execute();
+        $allUsers = $userStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $formattedDate  = date("F d, Y", strtotime($maintenance_date));
+        $formattedStart = date("h:i A", strtotime($start_time));
+        $formattedEnd   = date("h:i A", strtotime($end_time));
+        $allBarangays   = implode(", ", $barangays);
+
+        // Status-specific notification title + icon
+        $statusConfig = [
+            'upcoming' => [
+                'title' => "Maintenance Update: Rescheduled",
+                'icon'  => "⏳",
+                'label' => "UPCOMING"
+            ],
+            'ongoing' => [
+                'title' => "Power Maintenance Now Ongoing",
+                'icon'  => "⚡",
+                'label' => "NOW ONGOING"
+            ],
+            'completed' => [
+                'title' => "Power Restored – Maintenance Done",
+                'icon'  => "✅",
+                'label' => "COMPLETED"
+            ],
+            'cancelled' => [
+                'title' => "Maintenance Cancelled",
+                'icon'  => "🚫",
+                'label' => "CANCELLED"
+            ],
+        ];
+
+        $cfg = $statusConfig[$finalStatus] ?? [
+            'title' => "🔔 Maintenance Update",
+            'icon'  => "🔔",
+            'label' => strtoupper($finalStatus)
+        ];
+
+        foreach ($allUsers as $u) {
+
+            if (!$u['latitude'] || !$u['longitude']) {
+                continue;
+            }
+
+            // Find which barangays are near this user
+            $affected = [];
+
+            foreach ($barangayCoords as $name => $coord) {
+
+                $distance = haversineDistance(
+                    $coord['lat'],
+                    $coord['lng'],
+                    (float)$u['latitude'],
+                    (float)$u['longitude']
+                );
+
+                if ($distance <= $radius) {
+                    $affected[] = $name;
+                }
+            }
+
+            $affectedList = !empty($affected)
+                ? implode(", ", $affected)
+                : null;
+
+            // Build message body based on status and proximity
+            if ($finalStatus === 'upcoming') {
+
+                if (!empty($affected)) {
+                    $message = "{$cfg['icon']} Maintenance Update – {$cfg['label']}
+
+📍 Affected Area: {$allBarangays}
+📍 Your Area: {$affectedList}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+Details have been updated. Please prepare accordingly.
+
+{$company_name}";
+                } else {
+                    $message = "{$cfg['icon']} Maintenance Advisory – {$cfg['label']}
+
+📍 Affected Area: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+No direct impact expected in your area.
+
+{$company_name}";
+                }
+
+            } elseif ($finalStatus === 'ongoing') {
+
+                if (!empty($affected)) {
+                    $message = "{$cfg['icon']} Power Interruption – {$cfg['label']}
+
+⚠ Power is currently interrupted in your area.
+📍 Your Area: {$affectedList}
+📍 All Affected: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+Our team is actively working on this. Thank you for your patience.
+
+{$company_name}";
+                } else {
+                    $message = "{$cfg['icon']} Nearby Maintenance – {$cfg['label']}
+
+📍 Affected Area: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+No interruption expected in your immediate area.
+
+{$company_name}";
+                }
+
+            } elseif ($finalStatus === 'completed') {
+
+                if (!empty($affected)) {
+                    $message = "{$cfg['icon']} Power Restored – {$cfg['label']}
+
+✅ Power has been restored in your area.
+📍 Your Area: {$affectedList}
+📍 All Restored: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+Thank you for your patience!
+
+{$company_name}";
+                } else {
+                    $message = "{$cfg['icon']} Maintenance Completed – {$cfg['label']}
+
+📍 Area: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+Maintenance has concluded with no impact to your area.
+
+{$company_name}";
+                }
+
+            } elseif ($finalStatus === 'cancelled') {
+
+                $message = "{$cfg['icon']} Maintenance Cancelled
+
+The scheduled maintenance for {$allBarangays} on {$formattedDate} has been cancelled.
+🕒 Originally: {$formattedStart} – {$formattedEnd}
+
+No power interruption will occur.
+
+{$company_name}";
+
+            } else {
+
+                // Fallback for any future statuses
+                $message = "{$cfg['icon']} Maintenance Status: {$cfg['label']}
+
+📍 Area: {$allBarangays}
+📅 {$formattedDate}
+🕒 {$formattedStart} – {$formattedEnd}
+
+{$company_name}";
+            }
+
+            createNotification(
+                $conn,
+                [$u['id']],
+                $cfg['title'],
+                $message,
+                "maintenance",
+                $maintenance_id,
+                "maintenance",
+                $allBarangays
+            );
+
+            $notified++;
+        }
+    }
+
+    /* =========================================
        SUCCESS
-       NOTIFICATIONS TEMPORARILY REMOVED
-       TO PREVENT 500 ERRORS
     ========================================= */
     echo json_encode([
         "success"        => true,
@@ -346,8 +537,9 @@ try {
         "maintenance_id" => $maintenance_id,
         "status"         => $finalStatus,
         "barangays"      => $barangays,
+        "users_notified" => $notified,
         "debug"          => [
-            "received_data" => $data,
+            "received_data"  => $data,
             "barangay_count" => count($barangays)
         ]
     ]);
