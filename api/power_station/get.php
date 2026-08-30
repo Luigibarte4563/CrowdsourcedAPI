@@ -35,23 +35,26 @@ try {
     ========================================= */
     $stmt = $conn->prepare("
         SELECT 
-            id,
-            created_by,
-            station_name,
-            location_name,
-            latitude,
-            longitude,
-            station_type,
-            access_type,
-            availability_status,
-            operating_hours,
-            charging_type,
-            description,
-            image,
-            created_at,
-            updated_at
-        FROM power_stations
-        ORDER BY created_at DESC
+            ps.id,
+            ps.created_by,
+            ps.station_name,
+            ps.location_name,
+            ps.latitude,
+            ps.longitude,
+            pst.type_name AS station_type,
+            ps.access_type,
+            ps.availability_status,
+            ps.operating_hours,
+            ps.charging_type,
+            ps.description,
+            ps.image,
+            ps.created_at,
+            ps.updated_at,
+            b.barangay_name
+        FROM power_stations ps
+        LEFT JOIN power_station_types pst ON pst.id = ps.station_type_id
+        LEFT JOIN barangays b ON b.id = ps.barangay_id
+        ORDER BY ps.created_at DESC
         LIMIT :limit OFFSET :offset
     ");
 

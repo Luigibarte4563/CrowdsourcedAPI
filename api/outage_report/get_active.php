@@ -5,90 +5,61 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
-/* =========================================
-   DB CONNECTION SAFETY
-========================================= */
 try {
     $conn = getConnection();
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode([
-        "success" => false,
-        "message" => "Database connection failed"
-    ]);
+    echo json_encode(["success" => false, "message" => "Database connection failed"]);
     exit;
 }
 
-/* =========================================
-   JWT AUTH (SAFE)
-========================================= */
 try {
     $user = getUserFromJWT();
 } catch (Exception $e) {
     http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid token"
-    ]);
+    echo json_encode(["success" => false, "message" => "Invalid token"]);
     exit;
 }
 
 if (!$user || !isset($user['id'])) {
     http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized"
-    ]);
+    echo json_encode(["success" => false, "message" => "Unauthorized"]);
     exit;
 }
 
-/* =========================================
-   OPTIONAL FILTERS
-========================================= */
 $status   = $_GET['status'] ?? null;
 $category = $_GET['category'] ?? null;
 $severity = $_GET['severity'] ?? null;
 
-/* =========================================
-   BASE QUERY
-========================================= */
 $sql = "
     SELECT COUNT(*) AS total_active_reports
-    FROM outage_reports
-    WHERE status != 'rejected'
-      AND is_active = 1
+    FROM outage_reports orp
+    JOIN outage_statuses st  ON st.id = orp.status_id
+    JOIN outage_categories oc ON oc.id = orp.category_id
+    JOIN severity_levels sv   ON sv.id = orp.severity_id
+    WHERE st.status_name != 'rejected'
+      AND orp.is_active = 1
 ";
 
 $params = [];
 
-/* FILTER: STATUS */
 if (!empty($status)) {
-    $sql .= " AND status = :status";
+    $sql .= " AND st.status_name = :status";
     $params[':status'] = $status;
 }
-
-/* FILTER: CATEGORY */
 if (!empty($category)) {
-    $sql .= " AND category = :category";
+    $sql .= " AND oc.category_name = :category";
     $params[':category'] = $category;
 }
-
-/* FILTER: SEVERITY */
 if (!empty($severity)) {
-    $sql .= " AND severity = :severity";
+    $sql .= " AND sv.severity_name = :severity";
     $params[':severity'] = $severity;
 }
 
-/* =========================================
-   EXECUTE
-========================================= */
 try {
-
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
-
     $result = $stmt->fetch(PDO::FETCH_ASSOC);
-
     $count = $result['total_active_reports'] ?? 0;
 
     echo json_encode([
@@ -96,14 +67,7 @@ try {
         "message" => "Total active reports fetched successfully",
         "total_active_reports" => (int)$count
     ]);
-
 } catch (PDOException $e) {
-
     http_response_code(500);
-
-    echo json_encode([
-        "success" => false,
-        "message" => "Database query failed"
-        // "error" => $e->getMessage() // enable for debugging
-    ]);
+    echo json_encode(["success" => false, "message" => "Database query failed"]);
 }

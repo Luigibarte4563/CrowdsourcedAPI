@@ -9,37 +9,34 @@ $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 try {
-
     $user = getUserFromJWT();
     if (!$user || !isset($user['id'])) {
         http_response_code(401);
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
+        echo json_encode(["success" => false, "message" => "Unauthorized"]);
         exit;
     }
 
     $sql = "
-        SELECT 
+        SELECT
             ms.id,
             ms.created_by,
-            u.name AS company_name,
+            CONCAT_WS(' ', u.first_name, u.middle_name, u.last_name) AS company_name,
             ms.radius,
             ms.maintenance_date,
             ms.start_time,
             ms.end_time,
             ms.description,
-            ms.affected_barangays,
             ms.status,
             ms.created_at,
-            ml.barangay_name,
+            b.barangay_name,
             ml.latitude,
             ml.longitude
         FROM maintenance_schedules ms
         LEFT JOIN users u ON u.id = ms.created_by
         LEFT JOIN maintenance_locations ml ON ml.maintenance_id = ms.id
-        WHERE u.role = 'electric_company'
+        LEFT JOIN barangays b ON b.id = ml.barangay_id
+        LEFT JOIN roles r ON r.id = u.role_id
+        WHERE r.role_name = 'electric_company'
         ORDER BY ms.id DESC
     ";
 
@@ -50,18 +47,9 @@ try {
     $result = [];
 
     foreach ($rows as $row) {
-
         $id = $row['id'];
 
         if (!isset($result[$id])) {
-
-            // FIX barangay parsing (safe)
-            $barangays = json_decode($row['affected_barangays'], true);
-
-            if (!is_array($barangays)) {
-                $barangays = [];
-            }
-
             $result[$id] = [
                 "id" => (int)$row['id'],
                 "company_name" => $row['company_name'],
@@ -71,13 +59,11 @@ try {
                 "end_time" => $row['end_time'],
                 "description" => $row['description'],
                 "status" => $row['status'],
-                "affected_barangays" => $barangays,
                 "locations" => [],
                 "created_at" => $row['created_at']
             ];
         }
 
-        // FIX: proper coordinates mapping
         if (!empty($row['latitude']) && !empty($row['longitude'])) {
             $result[$id]['locations'][] = [
                 "barangay_name" => $row['barangay_name'],
@@ -92,13 +78,7 @@ try {
         "total" => count($result),
         "data" => array_values($result)
     ]);
-
 } catch (Throwable $e) {
-
     http_response_code(500);
-
-    echo json_encode([
-        "success" => false,
-        "message" => $e->getMessage()
-    ]);
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }

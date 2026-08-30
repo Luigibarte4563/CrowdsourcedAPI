@@ -30,8 +30,8 @@ try {
 
     $stmt = $conn->prepare("
         SELECT latitude, longitude
-        FROM users
-        WHERE id = :id
+        FROM user_locations
+        WHERE user_id = :id AND is_primary = 1
         LIMIT 1
     ");
 
@@ -78,36 +78,39 @@ try {
 
         $sql = "
             SELECT 
-                id,
-                created_by,
-                station_name,
-                location_name,
-                latitude,
-                longitude,
-                station_type,
-                access_type,
-                availability_status,
-                operating_hours,
-                charging_type,
-                description,
-                image,
-                created_at,
-                updated_at,
+                ps.id,
+                ps.created_by,
+                ps.station_name,
+                ps.location_name,
+                ps.latitude,
+                ps.longitude,
+                pst.type_name AS station_type,
+                ps.access_type,
+                ps.availability_status,
+                ps.operating_hours,
+                ps.charging_type,
+                ps.description,
+                ps.image,
+                ps.created_at,
+                ps.updated_at,
+                b.barangay_name,
 
                 (
                     6371000 * ACOS(
                         LEAST(1,
                         COS(RADIANS(:lat)) *
-                        COS(RADIANS(latitude)) *
-                        COS(RADIANS(longitude) - RADIANS(:lng)) +
+                        COS(RADIANS(ps.latitude)) *
+                        COS(RADIANS(ps.longitude) - RADIANS(:lng)) +
                         SIN(RADIANS(:lat)) *
-                        SIN(RADIANS(latitude))
+                        SIN(RADIANS(ps.latitude))
                         )
                     )
                 ) AS distance
 
-            FROM power_stations
-            WHERE availability_status = 'available'
+            FROM power_stations ps
+            LEFT JOIN power_station_types pst ON pst.id = ps.station_type_id
+            LEFT JOIN barangays b ON b.id = ps.barangay_id
+            WHERE ps.availability_status = 'available'
         ";
 
         $stmt = $conn->prepare($sql);
@@ -135,25 +138,28 @@ try {
 
         $stmt = $conn->prepare("
             SELECT 
-                id,
-                created_by,
-                station_name,
-                location_name,
-                latitude,
-                longitude,
-                station_type,
-                access_type,
-                availability_status,
-                operating_hours,
-                charging_type,
-                description,
-                image,
-                created_at,
-                updated_at,
+                ps.id,
+                ps.created_by,
+                ps.station_name,
+                ps.location_name,
+                ps.latitude,
+                ps.longitude,
+                pst.type_name AS station_type,
+                ps.access_type,
+                ps.availability_status,
+                ps.operating_hours,
+                ps.charging_type,
+                ps.description,
+                ps.image,
+                ps.created_at,
+                ps.updated_at,
+                b.barangay_name,
                 0 AS distance
-            FROM power_stations
-            WHERE availability_status = 'available'
-            ORDER BY created_at DESC
+            FROM power_stations ps
+            LEFT JOIN power_station_types pst ON pst.id = ps.station_type_id
+            LEFT JOIN barangays b ON b.id = ps.barangay_id
+            WHERE ps.availability_status = 'available'
+            ORDER BY ps.created_at DESC
         ");
 
         $stmt->execute();

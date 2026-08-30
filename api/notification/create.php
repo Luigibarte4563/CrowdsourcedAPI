@@ -4,145 +4,70 @@ header("Content-Type: application/json");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
+require_once __DIR__ . '/../../auth/rbac.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-/* =========================================
-   JWT AUTH
-========================================= */
-$user = getUserFromJWT();
+/* Staff-only: electric_company / admin can create notifications */
+$user = requireRole(requireAuthUser(), ['electric_company', 'admin']);
 
-if (!$user) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized (invalid token)"
-    ]);
-    exit;
-}
-
-$user_id = $user["id"] ?? null;
-$role = $user["role"] ?? null;
-
-if (!$user_id) {
-    http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid token data"
-    ]);
-    exit;
-}
-
-/* =========================================
-   ROLE CHECK (FIXED TO MATCH YOUR SCHEMA)
-========================================= */
-if (!in_array($role, ["electric_company", "admin"])) {
-    http_response_code(403);
-    echo json_encode([
-        "success" => false,
-        "message" => "Forbidden"
-    ]);
-    exit;
-}
-
-/* =========================================
-   GET COMPANY (FIXED: NO electric_companies TABLE)
-========================================= */
-$stmt = $conn->prepare("
-    SELECT id, name
-    FROM users
-    WHERE id = :user_id
-    AND role = 'electric_company'
-    LIMIT 1
-");
-
-$stmt->execute([":user_id" => $user_id]);
-$company = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$company) {
-    http_response_code(404);
-    echo json_encode([
-        "success" => false,
-        "message" => "Electric company profile not found"
-    ]);
-    exit;
-}
-
-$electric_company_id = $company["id"];
-
-/* =========================================
-   INPUT
-========================================= */
 $data = json_decode(file_get_contents("php://input"), true);
-
 if (json_last_error() !== JSON_ERROR_NONE) {
     http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "Invalid JSON"
-    ]);
+    echo json_encode(["success" => false, "message" => "Invalid JSON"]);
     exit;
 }
 
 $notifications = $data["notifications"] ?? null;
 
-/* =========================================
-   VALIDATION
-========================================= */
 if (!$notifications && !isset($data["user_id"], $data["title"], $data["message"])) {
     http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "Missing required fields"
-    ]);
+    echo json_encode(["success" => false, "message" => "Missing required fields"]);
     exit;
 }
 
-/* =========================================
-   INSERT
-========================================= */
 try {
-
     $conn->beginTransaction();
 
     $stmt = $conn->prepare("
-        INSERT INTO notifications 
-        (user_id, title, message, type)
-        VALUES (:user_id, :title, :message, :type)
+        INSERT INTO notifications
+            (user_id, notification_type_id, title, message)
+        VALUES (:user_id, :type_id, :title, :message)
     ");
 
-    /* ================================
-       BATCH INSERT
-    ================================ */
+    $typeStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = ? LIMIT 1");
+    $systemStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = 'system' LIMIT 1");
+    $systemStmt->execute();
+    $systemRow = $systemStmt->fetch(PDO::FETCH_ASSOC);
+    $systemId = $systemRow ? (int)$systemRow['id'] : null;
+
+    $count = 0;
+
+    $insertOne = function ($userId, $title, $message, $type) use ($conn, $stmt, $typeStmt, $systemId, &$count) {
+        $typeStmt->execute([$type]);
+        $row = $typeStmt->fetch(PDO::FETCH_ASSOC);
+        $typeId = $row ? (int)$row['id'] : $systemId;
+        if (!$typeId) return;
+
+        $stmt->execute([
+            ":user_id" => (int)$userId,
+            ":type_id" => $typeId,
+            ":title" => $title,
+            ":message" => $message
+        ]);
+        $count++;
+    };
+
     if ($notifications) {
-
         foreach ($notifications as $n) {
-
             if (!isset($n["user_id"], $n["title"], $n["message"])) {
                 continue;
             }
-
-            $stmt->execute([
-                ":user_id" => $n["user_id"],
-                ":title"   => $n["title"],
-                ":message" => $n["message"],
-                ":type"    => $n["type"] ?? "maintenance"
-            ]);
+            $insertOne($n["user_id"], $n["title"], $n["message"], $n["type"] ?? "maintenance");
         }
-
-    } 
-    /* ================================
-       SINGLE INSERT
-    ================================ */
-    else {
-
-        $stmt->execute([
-            ":user_id" => $data["user_id"],
-            ":title"   => $data["title"],
-            ":message" => $data["message"],
-            ":type"    => $data["type"] ?? "maintenance"
-        ]);
+    } else {
+        $insertOne($data["user_id"], $data["title"], $data["message"], $data["type"] ?? "maintenance");
     }
 
     $conn->commit();
@@ -150,19 +75,12 @@ try {
     echo json_encode([
         "success" => true,
         "message" => "Notification(s) created",
-        "company_id" => $electric_company_id
+        "created" => $count
     ]);
-
 } catch (Throwable $e) {
-
     if ($conn->inTransaction()) {
         $conn->rollBack();
     }
-
     http_response_code(500);
-
-    echo json_encode([
-        "success" => false,
-        "message" => $e->getMessage()
-    ]);
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }

@@ -5,48 +5,37 @@ header("Content-Type: application/json");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../config/env.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
+require_once __DIR__ . '/../services/lookup.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
 $conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 /* =========================================
    JWT AUTH
 ========================================= */
 $user = getUserFromJWT();
-
 if (!$user) {
     http_response_code(401);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unauthorized"
-    ]);
+    echo json_encode(["success" => false, "message" => "Unauthorized"]);
     exit;
 }
-
 $user_id = $user['id'];
 
 /* =========================================
    INPUT PARSING
 ========================================= */
-$rawInput = file_get_contents("php://input");
-$data = json_decode($rawInput, true);
-
+$data = json_decode(file_get_contents("php://input"), true);
 if (!is_array($data)) {
     $data = $_POST;
 }
 
-/* =========================================
-   VALIDATION
-========================================= */
 $location_name = trim($data["location_name"] ?? "");
 $description   = trim($data["description"] ?? "");
 
 if ($location_name === "" || $description === "") {
     http_response_code(400);
-    echo json_encode([
-        "success" => false,
-        "message" => "location_name and description are required"
-    ]);
+    echo json_encode(["success" => false, "message" => "location_name and description are required"]);
     exit;
 }
 
@@ -55,196 +44,171 @@ if ($location_name === "" || $description === "") {
 ========================================= */
 try {
     $check = $conn->prepare("
-        SELECT id FROM outage_reports 
-        WHERE user_id = ? 
-        AND status IN ('active','under_review','verified')
+        SELECT id FROM outage_reports
+        WHERE user_id = ?
+          AND status_id IN (
+              SELECT id FROM outage_statuses WHERE status_name IN ('active','under_review','verified')
+          )
         LIMIT 1
     ");
     $check->execute([$user_id]);
-
     if ($check->fetch()) {
         http_response_code(403);
-        echo json_encode([
-            "success" => false,
-            "message" => "You already have an active report"
-        ]);
+        echo json_encode(["success" => false, "message" => "You already have an active report"]);
         exit;
     }
-
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode([
-        "success" => false,
-        "message" => "Anti-spam check failed"
-    ]);
+    echo json_encode(["success" => false, "message" => "Anti-spam check failed"]);
     exit;
 }
 
 /* =========================================
-   COORDINATES (SAFE)
+   COORDINATES
 ========================================= */
 $geo = getCoordinates($location_name);
-
 if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
     http_response_code(404);
-    echo json_encode([
-        "success" => false,
-        "message" => "Unable to resolve location coordinates"
-    ]);
+    echo json_encode(["success" => false, "message" => "Unable to resolve location coordinates"]);
     exit;
 }
 
-$latitude  = (float) $geo["latitude"];
-$longitude = (float) $geo["longitude"];
+$latitude  = (float)$geo["latitude"];
+$longitude = (float)$geo["longitude"];
 
 /* =========================================
-   DISTANCE FUNCTION
+   BARANGAY RESOLUTION
+   (prefer an explicit barangay_name; otherwise fall back to geo matching)
 ========================================= */
-function haversineDistance($lat1, $lon1, $lat2, $lon2) {
-    $earthRadius = 6371000;
+$barangay_name = trim($data["barangay_name"] ?? "");
+$matched_barangay = null;
 
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-
-    $a = sin($dLat/2) * sin($dLat/2) +
-         cos(deg2rad($lat1)) *
-         cos(deg2rad($lat2)) *
-         sin($dLon/2) * sin($dLon/2);
-
-    $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-
-    return $earthRadius * $c;
-}
-
-/* =========================================
-   BARANGAY DATA
-========================================= */
-$barangays = [
-    ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
-    ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
-    ["name"=>"Bonuan Binloc","lat"=>16.0620,"lng"=>120.3100,"radius"=>4000],
-    ["name"=>"Lucao","lat"=>16.0435,"lng"=>120.3310,"radius"=>2500],
-    ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>2000],
-    ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>2000],
-    ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>2000],
-    ["name"=>"Herrero-Perez","lat"=>16.0455,"lng"=>120.3380,"radius"=>2000],
-    ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>2500],
-    ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1500],
-    ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1500]
-];
-
-/* =========================================
-   SMART MATCHING (FIXED)
-========================================= */
-function findBarangay($lat, $lng, $barangays, $location_name = "") {
+if ($barangay_name !== "") {
+    $matched_barangay = $barangay_name;
+} else {
+    $known = [
+        ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
+        ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
+        ["name"=>"Bonuan Binloc","lat"=>16.0620,"lng"=>120.3100,"radius"=>4000],
+        ["name"=>"Lucao","lat"=>16.0435,"lng"=>120.3310,"radius"=>2500],
+        ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>2000],
+        ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>2000],
+        ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>2000],
+        ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>2500],
+        ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1500],
+        ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1500]
+    ];
 
     $input = strtolower($location_name);
 
-    // 🔥 KEYWORD OVERRIDE (fixes Binloc issue)
     if (str_contains($input, "binloc")) {
-        return "Bonuan Binloc";
-    }
-    if (str_contains($input, "bonuan")) {
-        return "Bonuan Gueset";
-    }
-    if (str_contains($input, "lucao")) {
-        return "Lucao";
-    }
-
-    // 📍 DISTANCE MATCHING
-    $bestMatch = null;
-    $bestDistance = PHP_FLOAT_MAX;
-
-    foreach ($barangays as $b) {
-        $distance = haversineDistance($lat, $lng, $b["lat"], $b["lng"]);
-
-        if ($distance <= $b["radius"] && $distance < $bestDistance) {
-            $bestDistance = $distance;
-            $bestMatch = $b["name"];
+        $matched_barangay = "Bonuan Binloc";
+    } elseif (str_contains($input, "bonuan")) {
+        $matched_barangay = "Bonuan Gueset";
+    } elseif (str_contains($input, "lucao")) {
+        $matched_barangay = "Lucao";
+    } else {
+        $bestMatch = null;
+        $bestDistance = PHP_FLOAT_MAX;
+        foreach ($known as $b) {
+            $distance = haversineDistanceMeters($latitude, $longitude, $b["lat"], $b["lng"]);
+            if ($distance <= $b["radius"] && $distance < $bestDistance) {
+                $bestDistance = $distance;
+                $bestMatch = $b["name"];
+            }
         }
+        $matched_barangay = $bestMatch;
     }
-
-    return $bestMatch;
 }
 
-$matched_barangay = findBarangay($latitude, $longitude, $barangays, $location_name);
-
-/* =========================================
-   FINAL CHECK
-========================================= */
 if (!$matched_barangay) {
     http_response_code(403);
     echo json_encode([
         "success" => false,
         "message" => "Outside coverage area",
-        "debug" => [
-            "input" => $location_name,
-            "lat" => $latitude,
-            "lng" => $longitude
-        ]
+        "debug" => ["input" => $location_name, "lat" => $latitude, "lng" => $longitude]
     ]);
     exit;
 }
 
+$barangay_id = resolveBarangay($conn, $matched_barangay);
+
 /* =========================================
-   OPTIONAL FIELDS
+   LOOKUP FIELDS (strings -> normalized ids)
 ========================================= */
-$category        = $data["category"] ?? "power_outage";
-$severity        = $data["severity"] ?? "moderate";
-$image_proof     = $data["image_proof"] ?? null;
-$affected_houses = (int) ($data["affected_houses"] ?? 1);
-$hazard_type     = $data["hazard_type"] ?? "none";
+$category_id    = getCategoryId($conn, $data["category"] ?? null);
+$severity_id    = getSeverityId($conn, $data["severity"] ?? null);
+$hazard_type_id = getHazardTypeId($conn, $data["hazard_type"] ?? null);
+
+if (!$category_id || !$severity_id || !$hazard_type_id) {
+    http_response_code(400);
+    echo json_encode(["success" => false, "message" => "Invalid lookup value"]);
+    exit;
+}
+
+$affected_houses = max(1, (int)($data["affected_houses"] ?? 1));
 $started_at      = $data["started_at"] ?? null;
+$image_url       = $data["image_url"] ?? null;
 
 /* =========================================
    INSERT REPORT
 ========================================= */
 try {
-
     $stmt = $conn->prepare("
         INSERT INTO outage_reports (
             user_id,
+            barangay_id,
+            category_id,
+            severity_id,
+            hazard_type_id,
+            status_id,
             report_key,
             location_name,
             latitude,
             longitude,
-            category,
-            severity,
             description,
-            image_proof,
             affected_houses,
             is_active,
-            hazard_type,
-            started_at,
-            status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'active')
+            started_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     ");
+
+    $status_id = getStatusId($conn, 'active');
 
     $stmt->execute([
         $user_id,
+        $barangay_id,
+        $category_id,
+        $severity_id,
+        $hazard_type_id,
+        $status_id,
         uniqid("OR-"),
         $location_name,
         $latitude,
         $longitude,
-        $category,
-        $severity,
         $description,
-        $image_proof,
         $affected_houses,
-        $hazard_type,
         $started_at
     ]);
+
+    $outage_report_id = (int)$conn->lastInsertId();
+
+    /* Optional evidence image -> outage_report_images */
+    if (!empty($image_url)) {
+        $imgStmt = $conn->prepare("
+            INSERT INTO outage_report_images (outage_report_id, uploaded_by, image_url)
+            VALUES (?, ?, ?)
+        ");
+        $imgStmt->execute([$outage_report_id, $user_id, $image_url]);
+    }
 
     echo json_encode([
         "success" => true,
         "message" => "Report created",
+        "report_id" => $outage_report_id,
         "barangay" => $matched_barangay
     ]);
-
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode([
-        "success" => false,
-        "message" => "Database insert failed"
-    ]);
+    echo json_encode(["success" => false, "message" => "Database insert failed"]);
 }

@@ -9,70 +9,46 @@ $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 try {
-
-    /* ================= AUTH ================= */
     $user = getUserFromJWT();
-
     if (!$user || !isset($user['id'])) {
-
         http_response_code(401);
-
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
-
+        echo json_encode(["success" => false, "message" => "Unauthorized"]);
         exit;
     }
 
-    /* ================= FILTERS ================= */
     $status = $_GET['status'] ?? null;
-    $date = $_GET['date'] ?? null;
+    $date   = $_GET['date'] ?? null;
 
-    /* ================= QUERY ================= */
     $sql = "
-        SELECT 
+        SELECT
             ms.id,
             ms.created_by,
-
-            u.name AS company_name,
-
+            CONCAT_WS(' ', u.first_name, u.middle_name, u.last_name) AS company_name,
             ms.radius,
             ms.maintenance_date,
             ms.start_time,
             ms.end_time,
-
             ms.description,
-            ms.affected_barangays,
             ms.status,
             ms.created_at,
-
-            ml.barangay_name,
+            b.barangay_name,
             ml.latitude,
             ml.longitude
-
         FROM maintenance_schedules ms
-
-        LEFT JOIN users u
-            ON u.id = ms.created_by
-
-        LEFT JOIN maintenance_locations ml
-            ON ml.maintenance_id = ms.id
-
-        WHERE u.role = 'electric_company'
+        LEFT JOIN users u ON u.id = ms.created_by
+        LEFT JOIN maintenance_locations ml ON ml.maintenance_id = ms.id
+        LEFT JOIN barangays b ON b.id = ml.barangay_id
+        LEFT JOIN roles r ON r.id = u.role_id
+        WHERE r.role_name = 'electric_company'
     ";
 
     $params = [];
 
-    /* ================= OPTIONAL FILTERS ================= */
     if (!empty($status)) {
-
         $sql .= " AND ms.status = :status";
         $params[':status'] = $status;
     }
-
     if (!empty($date)) {
-
         $sql .= " AND ms.maintenance_date = :date";
         $params[':date'] = $date;
     }
@@ -81,86 +57,45 @@ try {
 
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
-
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* ================= GROUP RESULTS ================= */
     $result = [];
 
     foreach ($rows as $row) {
-
         $id = $row['id'];
 
         if (!isset($result[$id])) {
-
-            // SAFE barangay parsing
-            $barangays = json_decode($row['affected_barangays'], true);
-
-            if (!is_array($barangays)) {
-                $barangays = [];
-            }
-
             $result[$id] = [
-
                 "id" => (int)$row['id'],
                 "created_by" => (int)$row['created_by'],
-
                 "company_name" => $row['company_name'],
-
                 "radius" => (int)($row['radius'] ?? 2000),
-
                 "maintenance_date" => $row['maintenance_date'],
                 "start_time" => $row['start_time'],
                 "end_time" => $row['end_time'],
-
                 "description" => $row['description'],
-
                 "status" => $row['status'],
-
-                "affected_barangays" => $barangays,
-
                 "locations" => [],
-
                 "created_at" => $row['created_at']
             ];
         }
 
-        /* ================= LOCATIONS ================= */
         if (!empty($row['latitude']) && !empty($row['longitude'])) {
-
             $result[$id]['locations'][] = [
-
                 "barangay_name" => $row['barangay_name'],
-
                 "lat" => (float)$row['latitude'],
                 "lng" => (float)$row['longitude']
             ];
         }
     }
 
-    /* ================= RESPONSE ================= */
     echo json_encode([
-
         "success" => true,
-
         "message" => "Maintenance schedules fetched successfully",
-
         "total" => count($result),
-
         "data" => array_values($result)
-
     ]);
-
 } catch (Throwable $e) {
-
     http_response_code(500);
-
-    echo json_encode([
-
-        "success" => false,
-
-        "message" => $e->getMessage()
-
-    ]);
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }
-?>

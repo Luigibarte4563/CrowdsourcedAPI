@@ -5,8 +5,10 @@ header("Content-Type: application/json");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../services/get_coordinates.php';
+require_once __DIR__ . '/../services/lookup.php';
 
 $conn = getConnection();
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 /* =========================================
    JWT AUTH
@@ -72,6 +74,8 @@ $availability_status = $data["availability_status"] ?? "available";
 if (!in_array($station_type, $valid_station_types)) {
     $station_type = "power_station";
 }
+
+$station_type_id = getStationTypeId($conn, $station_type);
 
 if (!in_array($access_type, $valid_access_types)) {
     $access_type = "free";
@@ -144,11 +148,12 @@ try {
     $stmt = $conn->prepare("
         INSERT INTO power_stations (
             created_by,
+            barangay_id,
+            station_type_id,
             station_name,
             location_name,
             latitude,
             longitude,
-            station_type,
             access_type,
             availability_status,
             operating_hours,
@@ -157,11 +162,12 @@ try {
             image
         ) VALUES (
             :created_by,
+            :barangay_id,
+            :station_type_id,
             :station_name,
             :location_name,
             :latitude,
             :longitude,
-            :station_type,
             :access_type,
             :availability_status,
             :operating_hours,
@@ -171,13 +177,19 @@ try {
         )
     ");
 
+    $barangay_id = null;
+    if (!empty($data["barangay_name"])) {
+        $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
+    }
+
     $stmt->execute([
         ":created_by" => $user_id,
+        ":barangay_id" => $barangay_id,
+        ":station_type_id" => $station_type_id,
         ":station_name" => $station_name,
         ":location_name" => $location_name,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
-        ":station_type" => $station_type,
         ":access_type" => $access_type,
         ":availability_status" => $availability_status,
         ":operating_hours" => $operating_hours,
