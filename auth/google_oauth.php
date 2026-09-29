@@ -32,7 +32,6 @@ function exchangeGoogleCode($code) {
     $ch = curl_init('https://oauth2.googleapis.com/token');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
         'code'          => $code,
         'client_id'     => $_ENV['GOOGLE_CLIENT_ID'],
@@ -55,8 +54,16 @@ function exchangeGoogleCode($code) {
 /**
  * Verifies a Google id_token against Google's published JWKS and returns the
  * decoded claims (email, sub, name, picture), or null if invalid.
+ *
+ * The signature is checked against Google's trusted RS256 public keys; the
+ * token is never trusted on decode alone. exp/nbf/iat are validated by
+ * JWT::decode, and audience/issuer/required claims are validated below.
  */
 function verifyGoogleIdToken($idToken) {
+    if (!is_string($idToken) || substr_count($idToken, '.') !== 2) {
+        return null;
+    }
+
     $jwksBody = @file_get_contents('https://www.googleapis.com/oauth2/v3/certs');
     if ($jwksBody === false) {
         return null;
@@ -71,13 +78,38 @@ function verifyGoogleIdToken($idToken) {
 
     try {
         $payload = JWT::decode($idToken, $keys);
-
-        if (($_ENV['GOOGLE_CLIENT_ID'] ?? '') && $payload->aud !== $_ENV['GOOGLE_CLIENT_ID']) {
-            return null;
-        }
-
-        return (array)$payload;
     } catch (Exception $e) {
         return null;
     }
+
+    $claims = (array)$payload;
+
+    $clientId = $_ENV['GOOGLE_CLIENT_ID'] ?? '';
+
+    if ($clientId === '' || ($claims['aud'] ?? null) !== $clientId) {
+        return null;
+    }
+
+    if (!isset($claims['azp']) || $claims['azp'] !== $clientId) {
+        return null;
+    }
+
+    if (!in_array($claims['iss'] ?? null, [
+        'accounts.google.com',
+        'https://accounts.google.com'
+    ], true)) {
+        return null;
+    }
+
+    if (empty($claims['sub']) || empty($claims['email'])) {
+        return null;
+    }
+
+    if (isset($claims['email_verified']) &&
+        $claims['email_verified'] !== true &&
+        $claims['email_verified'] !== 'true') {
+        return null;
+    }
+
+    return $claims;
 }
