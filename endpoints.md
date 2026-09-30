@@ -46,6 +46,125 @@ Requests that mutate data accept a **JSON body** (also tolerate form-encoded).
 
 ---
 
+## Endpoint Access by Role
+
+Legend:
+`✅` = allowed · `🔒` = blocked (403) · `👤` = only on resources **you** own
+`—` = no authentication needed (public)
+
+| Endpoint | Public | `user` | `lineman` | `electric_company` | `admin` |
+|----------|:------:|:------:|:---------:|:------------------:|:-------:|
+| **Auth** |||||
+| `POST /api/auth/register.php` | — | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/auth/login.php` | — | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/auth/logout.php` | — | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/auth/google.php` | — | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/auth/google_callback.php` | — | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/auth/me.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| **Reference** |||||
+| `GET /api/reference/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| **Outage reports (own)** |||||
+| `POST /api/outage_report/create.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/outage_report/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/outage_report/get_active.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/outage_report/get_resolve.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/outage_report/get_my_report.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `GET /api/outage_report/get_detail.php` | 🔒 | 👤 | ✅ | ✅ | ✅ |
+| `POST /api/outage_report/update.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/outage_report/delete.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/outage_report/upload_image.php` | 🔒 | 👤 | ✅ | ✅ | ✅ |
+| **Outage field ops (staff)** |||||
+| `GET /api/outage/get.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| `POST /api/outage/verify.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| `POST /api/outage/add_update.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| **Outage mgmt (company)** |||||
+| `GET /api/outage_report_electric_com/get.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| `POST /api/outage_report_electric_com/update_single.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| `POST /api/outage_report_electric_com/update_barangay.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| `POST /api/outage_report_electric_com/update_dagupan.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+| **Maintenance (company writes)** |||||
+| `POST /api/maintenance/create.php` | 🔒 | 🔒 | 🔒 | ✅ | ✅ |
+| `POST /api/maintenance/update.php` | 🔒 | 🔒 | 🔒 | ✅ | ✅ |
+| `POST /api/maintenance/delete.php` | 🔒 | 🔒 | 🔒 | ✅ | ✅ |
+| `GET /api/maintenance/get_complete.php` | 🔒 | 🔒 | 🔒 | ✅ | ✅ |
+| `GET /api/maintenance/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/maintenance/get_upcoming.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/maintenance_map/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| **Power stations** |||||
+| `POST /api/power_station/create.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/power_station/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/power_station/get_available.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/power_station/get_near_location.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `GET /api/power_station/get_my_posts.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/power_station/update.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/power_station/delete.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| **Notifications** |||||
+| `GET /api/notification/get.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/notification/mark_as_read.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/notification/mark_all_as_read.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/notification/create.php` | 🔒 | 🔒 | 🔒 | ✅ | ✅ |
+| **User location** |||||
+| `GET /api/user_location/get.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/user_location/location.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| **Battery devices** |||||
+| `POST /api/battery/create.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `GET /api/battery/get.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `GET /api/battery/get_history.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/battery/update.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/battery/set_percentage.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/battery/log_usage.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/battery/delete.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| **Safety timers** |||||
+| `POST /api/safety_timer/create.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `GET /api/safety_timer/get.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/safety_timer/stop.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| `POST /api/safety_timer/delete.php` | 🔒 | 👤 | 👤 | 👤 | 👤 |
+| **Flood reports** |||||
+| `POST /api/flood_report/create.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/flood_report/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/flood_report/get_nearby.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| **Electrical hazards** |||||
+| `POST /api/electrical_hazard/create.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/electrical_hazard/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/electrical_hazard/get_nearby.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/electrical_hazard/update_status.php` | 🔒 | 👤 | ✅ | ✅ | ✅ |
+| **Risk / heatmap / clusters** |||||
+| `GET /api/risk/get_nearby.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/heatmap/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/cluster/get.php` | 🔒 | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/cluster/store.php` | 🔒 | 🔒 | ✅ | ✅ | ✅ |
+
+> `api/services/*.php` (`create_notification`, `get_coordinates`, `lookup`) are
+> **internal includes**, not HTTP endpoints — they are not meant to be called
+> directly.
+
+### Quick list per role
+
+**Everyone (no login)** — `register.php`, `login.php`, `logout.php`,
+`google.php`, `google_callback.php`
+
+**`user`** — everything marked `👤` or `✅` in the table: report & view outage
+reports (own detail only), power stations, maintenance viewing, notifications,
+user location, battery tracking, safety timers, flood reports, electrical
+hazards, risk areas, heatmap, cluster viewing, reference lookups, `me.php`.
+
+**`lineman`** (all of `user` **plus**) — field operations:
+`outage/get.php`, `outage/verify.php`, `outage/add_update.php`,
+`outage_report_electric_com/*` (all 4), `cluster/store.php`, and owner-or-staff
+access to `outage_report/get_detail.php`, `outage_report/upload_image.php`,
+`electrical_hazard/update_status.php`.
+
+**`electric_company`** (all of `lineman` **plus**) — maintenance management
+(`maintenance/create.php`, `update.php`, `delete.php`, `get_complete.php`) and
+broadcasting notifications (`notification/create.php`).
+
+**`admin`** — the union of every row in the table.
+
+> There is **no** user-management, role-assignment, or user-listing endpoint.
+> Role changes must be made directly in the database (`users.role_id`).
+
+---
+
 ## Auth Endpoints
 
 ### `POST /api/auth/register.php`
@@ -76,6 +195,8 @@ creates the user (always `user` role), and sets the JWT cookie. Returns JSON.
 
 ## Reference / Lookups
 
+> **Roles:** any authenticated user.
+
 ### `GET /api/reference/get.php`
 Returns all lookup tables in one call:
 `roles`, `barangays`, `outage_categories`, `severity_levels`, `hazard_types`,
@@ -85,6 +206,11 @@ Returns all lookup tables in one call:
 ---
 
 ## Outage Reports (user-facing)
+
+> **Roles:** any authenticated user. `get_detail` is owner-only for `user`
+> (staff may open any report); `update` and `delete` are **owner-only for every
+> role** — staff must use `/api/outage/*` or `/api/outage_report_electric_com/*`
+> instead. `upload_image` is owner-or-staff.
 
 ### `POST /api/outage_report/create.php`
 Create an outage report. Coordinates are geocoded (Geoapify) or matched to a
@@ -205,6 +331,10 @@ Filters: `?status=`, `?date=`.
 
 ## Power Stations
 
+> **Roles:** any authenticated user may browse, post, and view their own posts.
+> `update` and `delete` are **owner-only for every role**. `get_near_location`
+> and `get_my_posts` are scoped to the caller.
+
 ### `POST /api/power_station/create.php`
 Body: `station_name`, `location_name`, `station_type?` (`power_station` |
 `solar_station` | `charging_station` | `generator_station`), `access_type?`
@@ -234,6 +364,9 @@ Delete own station. Body: `station_id`.
 
 ## Notifications
 
+> **Roles:** `get`, `mark_as_read`, `mark_all_as_read` are own-notifications-only
+> for any authenticated user. `create` is **`electric_company` / `admin` only**.
+
 ### `GET /api/notification/get.php`
 List the user's notifications. Query: `?unread=1`, `?type=`, `?maintenance_id=`,
 `?limit=`, `?offset=`.
@@ -256,6 +389,8 @@ Either a single object `{user_id, title, message, type?}` or an array
 
 ## User Location
 
+> **Roles:** own location only, any authenticated user.
+
 ### `GET /api/user_location/get.php`
 Get the user's primary saved location.
 
@@ -266,6 +401,9 @@ Save/update the user's location. Body: `address` (or `location_name`),
 ---
 
 ## Battery Devices
+
+> **Roles:** own devices only, any authenticated user. Staff have no special
+> access to other users' devices.
 
 ### `POST /api/battery/create.php`
 Body: `device_name`, `device_type` (`phone`|`laptop`|`powerbank`|`ups`|`tablet`
@@ -299,6 +437,8 @@ Body: `device_id`. Ownership enforced.
 
 ## Safety Timers
 
+> **Roles:** own timers only, any authenticated user.
+
 ### `GET /api/reference/get.php`
 Returns `safety_timer_types`:
 `sealed_refrigerator` (4h / warn 1h), `deep_freezer_24h` (24h / 4h),
@@ -327,6 +467,9 @@ Body: `timer_id`. Deletes own timer.
 
 ## Flood Reports
 
+> **Roles:** any authenticated user. No staff-only variant; clearing is done via
+> the electrical-hazard / outage workflows.
+
 ### `POST /api/flood_report/create.php`
 Body: `location_name`, `flood_level` (`low`/`moderate`/`high`/`severe`),
 `flood_depth_cm?`, `description?`, `barangay_name?`, `latitude?`/`longitude?`,
@@ -342,6 +485,9 @@ Used for electrocution-risk display.
 ---
 
 ## Electrical Hazards
+
+> **Roles:** create/list/nearby are open to any authenticated user;
+> `update_status` is owner-only for `user` and open to all staff.
 
 ### `POST /api/electrical_hazard/create.php`
 Body: `location_name`, `hazard_type` (see `hazard_types` lookup, e.g.
@@ -364,6 +510,8 @@ reporter).
 
 ## Combined Risk Areas
 
+> **Roles:** any authenticated user.
+
 ### `GET /api/risk/get_nearby.php?lat=&lng=&radius=`
 Returns nearby active floods **and** unresolved electrical hazards together
 (each tagged with `category`), the primary source for rendering potential
@@ -372,6 +520,10 @@ electrocution-risk areas on the map.
 ---
 
 ## Heatmap & Clustering
+
+> **Roles:** `heatmap/get.php` and `cluster/get.php` are open to any
+> authenticated user; `cluster/store.php` is **staff only**
+> (`lineman` / `electric_company` / `admin`).
 
 ### `GET /api/heatmap/get.php`
 Rule-based heatmap of active outage reports.
