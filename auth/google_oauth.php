@@ -76,9 +76,25 @@ function verifyGoogleIdToken($idToken) {
 
     $keys = JWK::parseKeySet($jwks);
 
+    // Clock-skew tolerance.
+    //
+    // `JWT::$leeway` defaults to 0, so a token whose `iat` is even 1 second ahead of this
+    // machine's clock is rejected with BeforeValidException ("Cannot handle token with iat
+    // prior to ..."). Measured skew against Google's own Date header here is ~2 seconds,
+    // which is ordinary NTP slop - but it made Google sign-in fail roughly half the time,
+    // silently, because the catch below discarded the reason.
+    //
+    // 60s is the conventional OIDC allowance. It does not weaken signature verification,
+    // and the practical effect on `exp` is only that a token is honoured up to 60s past
+    // its stated expiry.
+    JWT::$leeway = 60;
+
     try {
         $payload = JWT::decode($idToken, $keys);
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
+        // Logged rather than swallowed: a silent null here is reported to the user as the
+        // opaque "google_invalid_token", which is impossible to diagnose from the frontend.
+        error_log('[google_oauth] id_token rejected: ' . get_class($e) . ': ' . $e->getMessage());
         return null;
     }
 
