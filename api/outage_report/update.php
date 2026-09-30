@@ -65,8 +65,35 @@ try {
     $longitude = (float)$report["longitude"];
     $barangay_id = $report["barangay_id"];
 
-    /* ================= GEO + BARANGAY UPDATE ================= */
-    if (!empty($data["location_name"]) && $data["location_name"] !== $report["location_name"]) {
+    /* ================= GEO + BARANGAY UPDATE =================
+       An explicit pin from the form's map wins. Otherwise re-geocode only when
+       the location name actually changed, so an unrelated edit (severity,
+       description, ...) never moves the report. */
+    $has_pin = isset($data["latitude"], $data["longitude"])
+        && is_numeric($data["latitude"]) && is_numeric($data["longitude"]);
+    $name_changed = !empty($data["location_name"]) && $data["location_name"] !== $report["location_name"];
+
+    if ($has_pin) {
+        $pin_lat = (float)$data["latitude"];
+        $pin_lng = (float)$data["longitude"];
+
+        // A pin is user input, so reject out-of-range values (is_finite also
+        // catches "1e999" overflowing to INF).
+        if (!is_finite($pin_lat) || !is_finite($pin_lng)
+            || $pin_lat < -90 || $pin_lat > 90
+            || $pin_lng < -180 || $pin_lng > 180) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
+            exit;
+        }
+
+        $latitude = $pin_lat;
+        $longitude = $pin_lng;
+
+        if (!empty($data["barangay_name"])) {
+            $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
+        }
+    } elseif ($name_changed) {
         $geo = getCoordinates($location_name);
         if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
             http_response_code(400);

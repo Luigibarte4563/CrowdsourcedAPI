@@ -65,16 +65,32 @@ try {
 
 /* =========================================
    COORDINATES
-========================================= */
-$geo = getCoordinates($location_name);
-if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
-    http_response_code(404);
-    echo json_encode(["success" => false, "message" => "Unable to resolve location coordinates"]);
-    exit;
-}
+   Prefer an explicit pin dropped on the report form's map; otherwise geocode the
+   typed location name. Same contract as flood_report/create.php.
+   ========================================= */
+if (isset($data["latitude"], $data["longitude"]) && is_numeric($data["latitude"]) && is_numeric($data["longitude"])) {
+    $latitude  = (float)$data["latitude"];
+    $longitude = (float)$data["longitude"];
 
-$latitude  = (float)$geo["latitude"];
-$longitude = (float)$geo["longitude"];
+    // A pin is user input, so reject out-of-range values before they reach the
+    // coverage check below (is_finite also catches "1e999" overflowing to INF).
+    if (!is_finite($latitude) || !is_finite($longitude)
+        || $latitude < -90 || $latitude > 90
+        || $longitude < -180 || $longitude > 180) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
+        exit;
+    }
+} else {
+    $geo = getCoordinates($location_name);
+    if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
+        http_response_code(404);
+        echo json_encode(["success" => false, "message" => "Unable to resolve location coordinates"]);
+        exit;
+    }
+    $latitude  = (float)$geo["latitude"];
+    $longitude = (float)$geo["longitude"];
+}
 
 /* =========================================
    BARANGAY RESOLUTION

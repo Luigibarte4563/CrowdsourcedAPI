@@ -2,9 +2,13 @@
 
 require_once __DIR__ . '/env.php';
 
-$frontendUrl = FRONTEND_URL ?? 'http://localhost:5173';
+$frontendUrl = FRONTEND_URL ?? 'http://localhost:5174';
 
+// Origins allowed to call the API. Keep 5173 here as well so the app still works
+// when Vite happens to get the default port.
 $allowedOrigins = [
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
 ];
