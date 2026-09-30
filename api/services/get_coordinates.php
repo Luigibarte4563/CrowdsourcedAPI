@@ -16,9 +16,15 @@ function getCoordinates($location) {
 
     $apiKey = $_ENV['GEOAPIFY_GEOCODING_API_KEY'];
 
+    // This app only covers Dagupan City, Pangasinan. Without a country filter
+    // Geoapify returns the best GLOBAL match, which lands somewhere else
+    // entirely: "San Carlos Cathedral, Dagupan City" resolved to a cathedral in
+    // Carmel, California (36.60, -121.89). Pinning the search to the Philippines
+    // keeps saved locations and report coordinates inside the service area.
     $url =
         "https://api.geoapify.com/v1/geocode/search?text="
         . urlencode($location)
+        . "&filter=countrycode:ph"
         . "&apiKey="
         . $apiKey;
 

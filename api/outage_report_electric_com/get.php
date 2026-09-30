@@ -5,117 +5,76 @@ header("Content-Type: application/json; charset=UTF-8");
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
+require_once __DIR__ . '/../../config/db_connect.php';
+require_once __DIR__ . '/../../auth/jwt_auth.php';
+require_once __DIR__ . '/../../auth/rbac.php';
+
 try {
-
-    require_once __DIR__ . '/../../config/db_connect.php';
-    require_once __DIR__ . '/../../auth/jwt_auth.php';
-
     $conn = getConnection();
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    /* =========================================
-       AUTH
-    ========================================= */
-    $user = getUserFromJWT();
+    requireRole(requireAuthUser(), ['electric_company', 'admin', 'lineman']);
 
-    if (!$user || ($user['role'] ?? '') !== 'electric_company') {
-        http_response_code(401);
-        echo json_encode([
-            "success" => false,
-            "message" => "Unauthorized"
-        ]);
-        exit;
-    }
-
-    /* =========================================
-       OPTIONAL FILTERS
-    ========================================= */
-    $status = $_GET['status'] ?? null;
+    $status   = $_GET['status'] ?? null;
     $severity = $_GET['severity'] ?? null;
-    $active = isset($_GET['active']) ? (int)$_GET['active'] : null;
+    $active   = isset($_GET['active']) ? (int)$_GET['active'] : null;
 
-    /* =========================================
-       QUERY
-    ========================================= */
     $sql = "
-        SELECT 
-            id,
-            user_id,
-            location_name,
-            latitude,
-            longitude,
-            category,
-            severity,
-            description,
-            image_proof,
-            affected_houses,
-            is_active,
-            hazard_type,
-            status,
-            started_at,
-            verified_at,
-            resolved_at,
-            resolution_note,
-            created_at,
-            updated_at
-        FROM outage_reports
+        SELECT
+            orp.id,
+            orp.user_id,
+            orp.location_name,
+            orp.latitude,
+            orp.longitude,
+            orp.description,
+            orp.affected_houses,
+            orp.is_active,
+            orp.started_at,
+            orp.resolved_at,
+            orp.resolution_note,
+            orp.created_at,
+            orp.updated_at,
+            b.barangay_name,
+            oc.category_name AS category,
+            sv.severity_name AS severity,
+            hz.hazard_name AS hazard_type,
+            st.status_name AS status
+        FROM outage_reports orp
+        JOIN outage_categories oc ON oc.id = orp.category_id
+        JOIN severity_levels sv   ON sv.id = orp.severity_id
+        JOIN hazard_types hz     ON hz.id = orp.hazard_type_id
+        JOIN outage_statuses st  ON st.id = orp.status_id
+        LEFT JOIN barangays b    ON b.id = orp.barangay_id
         WHERE 1=1
     ";
 
     $params = [];
 
-    /* =========================================
-       FILTER STATUS
-    ========================================= */
     if (!empty($status)) {
-        $sql .= " AND status = :status";
+        $sql .= " AND st.status_name = :status";
         $params[':status'] = $status;
     }
-
-    /* =========================================
-       FILTER SEVERITY
-    ========================================= */
     if (!empty($severity)) {
-        $sql .= " AND severity = :severity";
+        $sql .= " AND sv.severity_name = :severity";
         $params[':severity'] = $severity;
     }
-
-    /* =========================================
-       FILTER ACTIVE
-    ========================================= */
     if ($active !== null) {
-        $sql .= " AND is_active = :active";
+        $sql .= " AND orp.is_active = :active";
         $params[':active'] = $active;
     }
 
-    /* =========================================
-       ORDER
-    ========================================= */
-    $sql .= " ORDER BY created_at DESC";
+    $sql .= " ORDER BY orp.created_at DESC";
 
-    /* =========================================
-       EXECUTE
-    ========================================= */
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
-
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    /* =========================================
-       RESPONSE
-    ========================================= */
     echo json_encode([
         "success" => true,
         "count" => count($rows),
         "data" => $rows
     ]);
-
 } catch (Throwable $e) {
-
     http_response_code(500);
-
-    echo json_encode([
-        "success" => false,
-        "message" => "Server error"
-    ]);
+    echo json_encode(["success" => false, "message" => "Server error"]);
 }
