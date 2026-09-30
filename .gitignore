@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+/vendor/
+
+# Logs
+*.log
+error_log
+/error_log
+
+# Caches
+/cache/
+/tmp/
+.php-cs-fixer.cache
+.phpunit.result.cache
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
