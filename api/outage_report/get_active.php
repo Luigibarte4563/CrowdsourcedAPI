@@ -6,6 +6,7 @@ header("Content-Type: application/json; charset=UTF-8");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 try {
     $conn = getConnection();
@@ -57,6 +58,15 @@ if (!empty($severity)) {
     $sql .= " AND sv.severity_name = :severity";
     $params[':severity'] = $severity;
 }
+
+/*
+ * Scoped for a lineman, like the outage list endpoints.
+ *
+ * Without this the count would be city-wide while `outage/get.php` returns only the
+ * lineman's assigned barangays, so the dashboard would show "3 active" above a list of
+ * 1. electric_company and admin are unaffected - `lineman_scope_sql` returns '' for them.
+ */
+$sql .= lineman_scope_sql($conn, $user, 'orp.barangay_id', $params);
 
 try {
     $stmt = $conn->prepare($sql);

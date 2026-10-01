@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../services/lookup.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -31,13 +32,9 @@ if ($outageReportId <= 0 || $updateMessage === "") {
 }
 
 try {
-    $stmt = $conn->prepare("SELECT id FROM outage_reports WHERE id = ? LIMIT 1");
-    $stmt->execute([$outageReportId]);
-    if (!$stmt->fetch()) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Report not found"]);
-        exit;
-    }
+    /* Existence + assignment check first: a denied field update must not reach
+   outage_report_updates, nor be able to advance the report's status. */
+    require_outage_access($conn, $user, $outageReportId);
 
     $status_id = null;
     if ($statusName !== "") {

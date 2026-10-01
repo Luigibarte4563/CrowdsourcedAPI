@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../services/lookup.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -39,13 +40,13 @@ if ($outageReportId <= 0) {
 }
 
 try {
-    $stmt = $conn->prepare("SELECT id FROM outage_reports WHERE id = ? LIMIT 1");
-    $stmt->execute([$outageReportId]);
-    if (!$stmt->fetch()) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Report not found"]);
-        exit;
-    }
+    /*
+     * Existence + assignment check together, BEFORE any write. Answers 404 for a report
+     * that does not exist and 403 for one whose barangay this lineman is not assigned
+     * to, so a rejected verification leaves no row in outage_report_verifications.
+     * company/admin pass through untouched.
+     */
+    require_outage_access($conn, $user, $outageReportId);
 
     /* Preserve verification history */
     $conn->prepare("

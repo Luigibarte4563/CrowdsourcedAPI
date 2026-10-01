@@ -7,11 +7,13 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-requireRole(requireAuthUser(), ['lineman', 'electric_company', 'admin']);
+/* A lineman sees only their assigned barangays; company and admin are unaffected. */
+$user = requireRole(requireAuthUser(), ['lineman', 'electric_company', 'admin']);
 
 $status   = $_GET['status'] ?? null;
 $category = $_GET['category'] ?? null;
@@ -34,6 +36,7 @@ $sql = "
         orp.resolution_note,
         orp.created_at,
         orp.updated_at,
+        b.id AS barangay_id,
         b.barangay_name,
         oc.category_name AS category,
         sv.severity_name AS severity,
@@ -66,6 +69,15 @@ if (!empty($barangay)) {
     $sql .= " AND b.barangay_name = :barangay";
     $params[':barangay'] = $barangay;
 }
+
+/*
+ * Applied last, and as a subquery in the WHERE clause rather than a PHP-side filter.
+ *
+ * A lineman's ?barangay=Poblacion cannot widen their scope: the two conditions are
+ * ANDed, so asking for an unassigned barangay yields an empty result rather than the
+ * rows behind it. company/admin get an empty string here and are not narrowed at all.
+ */
+$sql .= lineman_scope_sql($conn, $user, 'orp.barangay_id', $params);
 
 $sql .= " ORDER BY orp.created_at DESC";
 

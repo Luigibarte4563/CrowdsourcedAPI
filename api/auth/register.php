@@ -24,7 +24,6 @@ $middle_name = trim($data["middle_name"] ?? "");
 $last_name   = trim($data["last_name"]   ?? "");
 $email       = strtolower(trim($data["email"] ?? ""));
 $password    = $data["password"] ?? "";
-$requested_role = strtolower(trim($data["role"] ?? "user"));
 
 /* =========================================
    VALIDATION
@@ -78,14 +77,13 @@ try {
 
 /* =========================================
    ROLE ASSIGNMENT
-   Accepts an optional "role" from the frontend and resolves it against the
-   roles lookup table. Defaults to "user" when absent or invalid. Roles are
-   validated by name so only real configured roles can be assigned.
-========================================= */
-$roleId = getRoleIdByName($requested_role);
-if (!$roleId) {
-    $roleId = getRoleIdByName('user');
-}
+   Self-registration ALWAYS creates a `user`. A `role` in the request body is ignored
+   outright rather than validated-and-honoured: this endpoint is unauthenticated, so
+   accepting a role from it let anybody `POST {"role":"admin"}` and mint themselves a
+   privileged account. `lineman`, `electric_company` and `admin` are granted only by a
+   system administrator writing `users.role_id` directly (see endpoints.md).
+   ========================================= */
+$roleId = getRoleIdByName('user');
 if (!$roleId) {
     http_response_code(500);
     echo json_encode(["success" => false, "message" => "Role configuration missing"]);

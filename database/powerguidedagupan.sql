@@ -1032,7 +1032,59 @@ ON notifications(is_read);
 
 
 -- =========================================================
--- 28. DAGUPAN CITY BARANGAYS
+-- 28. LINEMAN ASSIGNMENTS
+--
+-- Which `lineman` covers which barangay. Read by the backend (auth/lineman_access.php)
+-- to scope outage access, never by the client. Kept identical to the standalone
+-- migration in database/002_lineman_assignments.sql, which is what an existing
+-- database is upgraded with.
+-- =========================================================
+
+CREATE TABLE lineman_assignments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    lineman_id INT NOT NULL,
+
+    barangay_id INT NOT NULL,
+
+    /* Written by the backend from the JWT identity, never from the request. */
+    assigned_by INT NOT NULL,
+
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    /* RESTRICT, not CASCADE: dropping a user or barangay that is covered by an
+       assignment has to be a deliberate act, not a cascade. */
+    FOREIGN KEY (lineman_id)
+        REFERENCES users(id)
+        ON DELETE RESTRICT,
+
+    FOREIGN KEY (barangay_id)
+        REFERENCES barangays(id)
+        ON DELETE RESTRICT,
+
+    FOREIGN KEY (assigned_by)
+        REFERENCES users(id)
+        ON DELETE RESTRICT,
+
+    /* One row per lineman/barangay pair, so a re-assignment reactivates that row
+       instead of inserting a duplicate. */
+    UNIQUE KEY uq_lineman_assignments_pair (lineman_id, barangay_id)
+);
+
+CREATE INDEX idx_lineman_assignments_lineman_status
+ON lineman_assignments(lineman_id, status);
+
+CREATE INDEX idx_lineman_assignments_barangay
+ON lineman_assignments(barangay_id);
+
+
+-- =========================================================
+-- 29. DAGUPAN CITY BARANGAYS
 -- =========================================================
 
 INSERT INTO barangays (barangay_name) VALUES

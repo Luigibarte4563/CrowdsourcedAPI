@@ -161,7 +161,7 @@ CrowdsourcedAPI/
 ## Database & Migration
 
 The canonical schema is `database/powerguidedagupan.sql` — a **normalized** design
-(27 tables) with seeded lookup data:
+(28 tables) with seeded lookup data:
 
 - **Lookup tables:** `roles`, `outage_categories`, `severity_levels`,
   `hazard_types`, `outage_statuses`, `power_station_types`, `safety_timer_types`,
@@ -176,9 +176,36 @@ The canonical schema is `database/powerguidedagupan.sql` — a **normalized** de
 - **Disaster reports:** `flood_reports`, `electrical_hazards`.
 - **Company tools:** `maintenance_schedules`, `maintenance_locations`,
   `power_stations`, `notifications`.
+- **Staff scoping:** `lineman_assignments` — which `lineman` covers which
+  `barangay`, enforced by the backend on the outage endpoints.
 
 > The older `database/crowdsource.sql` and `database/powerguard.sql` are legacy
 > schemas kept for reference; **`powerguidedagupan.sql` is the one to import.**
+
+### Migrations (existing database)
+
+Incremental scripts live beside the schema and are numbered, so an existing
+database can be brought up to date without being recreated. Each one is written to
+be **additive and idempotent** (`CREATE TABLE IF NOT EXISTS`, no `DROP`, no data
+rewrites) — re-running one against an already-migrated database is a no-op.
+
+| Script | Adds |
+|--------|------|
+| `database/002_lineman_assignments.sql` | `lineman_assignments` — lineman ↔ barangay assignments |
+
+Apply one with:
+
+```bash
+"C:\xampp\mysql\bin\mysql.exe" -u root powerguide < database\002_lineman_assignments.sql
+```
+
+Or in phpMyAdmin: select the `powerguide` database, **Import →** choose
+`database/002_lineman_assignments.sql`.
+
+> A fresh install that imports `powerguidedagupan.sql` already contains this
+> table — the numbered script is only for a database created before it existed.
+> Never re-run `powerguidedagupan.sql` against a populated database: it starts
+> with `DROP DATABASE`.
 
 ### Import (fresh install)
 
@@ -220,14 +247,39 @@ role.
 | Role | Meaning | Typical access |
 |------|---------|----------------|
 | `user` | Regular resident | report/view outages, floods, hazards; safety tools |
-| `lineman` | DECORP field personnel | verify reports, field updates, hazard resolution |
-| `electric_company` | DECORP staff | manage maintenance, create notifications, resolve outages |
+| `lineman` | DECORP field personnel | verify reports, field updates, hazard resolution — **only in assigned barangays** |
+| `electric_company` | DECORP staff | manage maintenance, create notifications, resolve outages, assign linemen |
 | `admin` | System administrator | same as company + full control |
 
 `lineman`, `electric_company`, and `admin` are collectively treated as
 **staff** by several endpoints (staff may act on reports they did not create).
-Maintenance creation/update, `notification/create`, and `cluster/store` are
-restricted to company/admin (`requireRole`).
+Maintenance creation/update, `notification/create`, `cluster/store` and
+`lineman_assignment/*` are restricted to company/admin (`requireRole`).
+
+### Lineman assignments
+
+A `lineman` only operates on outage reports in the barangays an
+`electric_company` / `admin` account has assigned to them. The mapping lives in
+`lineman_assignments` and is enforced **in SQL** by `auth/lineman_access.php`,
+which every outage endpoint calls:
+
+- **List endpoints** (`outage/get.php`, `outage_report_electric_com/get.php`,
+  `outage_report/get_detail.php`) restrict the query with a subquery on active
+  assignments, so an unauthorized report is never loaded. A `?barangay=` filter
+  cannot widen this — it is ANDed with the scope.
+- **Single-record actions** (`outage/verify.php`, `outage/add_update.php`,
+  `outage_report_electric_com/update_single.php`) check the report's barangay
+  *before* writing, answering `403` without touching any table.
+- `outage_report_electric_com/update_barangay.php` is checked against the same
+  assignments; `update_dagupan.php` (city-wide, no `WHERE` clause) is
+  **company/admin only**.
+- `electric_company` and `admin` pass through untouched — their access is
+  unchanged.
+
+Managers read and write assignments at `api/lineman_assignment/*`; a lineman
+reads only their own scope via `my.php`, which takes **no** identity parameter —
+the caller comes from the JWT alone. Full reference in
+[`endpoints.md`](endpoints.md#lineman-assignments).
 
 ### Helpers
 
@@ -278,6 +330,7 @@ A full, per-endpoint reference with methods, roles, and request bodies is in
 | Outage (user) | `outage_report/{create,get,get_active,get_resolve,get_my_report,get_detail,update,delete,upload_image}.php` |
 | Outage (staff) | `outage/{get,verify,add_update}.php` |
 | Outage (company) | `outage_report_electric_com/{get,update_single,update_barangay,update_dagupan}.php` |
+| Lineman assignments | `lineman_assignment/{get,create,update,delete,my,linemen}.php` |
 | Maintenance | `maintenance/{create,update,get,get_upcoming,get_complete,delete}.php`, `maintenance_map/get.php` |
 | Power stations | `power_station/{create,get,get_available,get_my_posts,get_near_location,update,delete}.php` |
 | Notifications | `notification/{get,mark_as_read,mark_all_as_read,create}.php` |
@@ -334,5 +387,15 @@ GOOGLE_REDIRECT_URI=http://localhost/CrowdsourcedAPI/api/auth/google_callback.ph
 - **Ownership checks** — mutate operations scope queries to `user_id` /
   `created_by` so users can only change their own data (battery, timers,
   stations, reports, locations).
+- **Assignment checks** — a `lineman`'s outage access is scoped to their
+  actively assigned barangays, enforced in SQL by `auth/lineman_access.php`
+  (list endpoints exclude unauthorized rows; single-record actions answer `403`
+  before writing).
+- **Server-derived authorship** — `assigned_by` comes from the JWT, never the
+  request body, and an assignment target's role is re-read from `roles` on every
+  write, so a client cannot nominate who made a change or who is a lineman.
+- **Registration always creates a `user`** — `register.php` ignores any `role` in
+  the body. Privileged roles are granted only by writing `users.role_id`
+  directly.
 - Google OAuth credentials and the JWT secret are **placeholders in `.env`** —
   replace them before deploying publicly; never commit real secrets.
