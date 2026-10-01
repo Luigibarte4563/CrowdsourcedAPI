@@ -66,11 +66,14 @@ try {
             ];
         }
 
-        if (!empty($row['latitude']) && !empty($row['longitude'])) {
+        // A location row exists for every affected barangay. Its coordinates come from
+        // geocoding the name, so they can legitimately be null - the name must still be
+        // returned, or the schedule shows no affected area at all.
+        if (!empty($row['barangay_name'])) {
             $result[$id]['locations'][] = [
                 "barangay_name" => $row['barangay_name'],
-                "lat" => (float)$row['latitude'],
-                "lng" => (float)$row['longitude']
+                "lat" => $row['latitude'] !== null ? (float)$row['latitude'] : null,
+                "lng" => $row['longitude'] !== null ? (float)$row['longitude'] : null
             ];
         }
     }
