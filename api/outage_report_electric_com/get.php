@@ -8,12 +8,13 @@ ini_set('display_errors', 0);
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 try {
     $conn = getConnection();
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    requireRole(requireAuthUser(), ['electric_company', 'admin', 'lineman']);
+    $user = requireRole(requireAuthUser(), ['electric_company', 'admin', 'lineman']);
 
     $status   = $_GET['status'] ?? null;
     $severity = $_GET['severity'] ?? null;
@@ -34,6 +35,7 @@ try {
             orp.resolution_note,
             orp.created_at,
             orp.updated_at,
+            b.id AS barangay_id,
             b.barangay_name,
             oc.category_name AS category,
             sv.severity_name AS severity,
@@ -62,6 +64,13 @@ try {
         $sql .= " AND orp.is_active = :active";
         $params[':active'] = $active;
     }
+
+    /*
+     * Same scoping rule as outage/get.php, applied last so a lineman's own filters can
+     * only ever narrow their assigned set further. Returns '' for company/admin, so
+     * their access here is unchanged.
+     */
+    $sql .= lineman_scope_sql($conn, $user, 'orp.barangay_id', $params);
 
     $sql .= " ORDER BY orp.created_at DESC";
 

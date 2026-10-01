@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../services/lookup.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -36,6 +37,10 @@ if (!in_array($status, $valid, true)) {
 }
 
 try {
+    /* A lineman may only set the status of a report in an assigned barangay. The check
+       runs before the UPDATE, so a denied request changes nothing. */
+    require_outage_access($conn, $user, $id);
+
     $statusId = getStatusId($conn, $status);
     $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
     $params = [":status_id" => $statusId, ":id" => $id];

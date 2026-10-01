@@ -5,6 +5,7 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -53,6 +54,15 @@ try {
         http_response_code(403);
         echo json_encode(["success" => false, "message" => "Forbidden"]);
         exit;
+    }
+
+    /*
+     * Staff status normally lets someone open any report. For a lineman it is narrowed:
+     * reading the detail of an outage is acting on it, so a report outside their
+     * assigned barangays is refused. company/admin are not narrowed.
+     */
+    if (!lineman_can_access_barangay($conn, $user, $report['barangay_id'])) {
+        denyAccess("This outage is not in one of your assigned barangays.");
     }
 
     /* Images */

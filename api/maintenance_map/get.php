@@ -80,11 +80,13 @@ try {
             ];
         }
 
-        if (!empty($row['latitude']) && !empty($row['longitude'])) {
+        // Names are always returned; coordinates may be null when geocoding failed, and the
+        // client plots only the entries that have them.
+        if (!empty($row['barangay_name'])) {
             $result[$id]['locations'][] = [
                 "barangay_name" => $row['barangay_name'],
-                "lat" => (float)$row['latitude'],
-                "lng" => (float)$row['longitude']
+                "lat" => $row['latitude'] !== null ? (float)$row['latitude'] : null,
+                "lng" => $row['longitude'] !== null ? (float)$row['longitude'] : null
             ];
         }
     }

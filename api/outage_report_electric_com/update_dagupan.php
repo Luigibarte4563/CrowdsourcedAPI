@@ -6,11 +6,24 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../services/lookup.php';
+require_once __DIR__ . '/../../auth/lineman_access.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 $user = requireRole(requireAuthUser(), ['electric_company', 'admin', 'lineman']);
+
+/*
+ * This endpoint issues one UPDATE with no WHERE clause - it rewrites every report in
+ * Dagupan. There is no barangay to narrow it to, so a lineman cannot be given a
+ * scoped version of it: their assignment covers specific barangays, and this reaches
+ * far past all of them. Denied outright rather than silently narrowed.
+ *
+ * electric_company and admin keep the city-wide action exactly as before.
+ */
+if (lineman_scope_required($user)) {
+    denyAccess("City-wide outage updates are limited to electric company and admin accounts.");
+}
 
 $data = json_decode(file_get_contents("php://input"), true);
 
