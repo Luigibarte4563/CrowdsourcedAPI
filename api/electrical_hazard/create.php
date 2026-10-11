@@ -5,7 +5,6 @@ header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
 
 $conn = getConnection();
@@ -44,23 +43,63 @@ if (!$hazard_type_id) {
     exit;
 }
 
-if (isset($data["latitude"], $data["longitude"]) && is_numeric($data["latitude"]) && is_numeric($data["longitude"])) {
-    $latitude = (float)$data["latitude"];
-    $longitude = (float)$data["longitude"];
-} else {
-    $geo = getCoordinates($location_name);
-    if (!$geo['success'] ?? false) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Unable to resolve location coordinates"]);
-        exit;
-    }
-    $latitude = (float)$geo["latitude"];
-    $longitude = (float)$geo["longitude"];
+/* =========================================
+   BARANGAY -> COORDINATES
+   The barangay is the coordinate authority. `location_name` is a label shown to
+   other users and is never geocoded; an explicit pin refines the centroid.
+   ========================================= */
+$barangay_name = trim($data["barangay_name"] ?? "");
+
+if ($barangay_name === "") {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "barangay_name is required",
+        "field" => "barangayName"
+    ]);
+    exit;
 }
 
-$barangay_id = null;
-if (!empty($data["barangay_name"])) {
-    $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
+$barangay = resolveBarangayCoords($conn, $barangay_name);
+
+if (!$barangay) {
+    $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+    $existsStmt->execute([$barangay_name]);
+    $exists = (bool)$existsStmt->fetchColumn();
+
+    http_response_code($exists ? 503 : 400);
+    echo json_encode([
+        "success" => false,
+        "message" => $exists
+            ? "We do not have map coordinates for $barangay_name yet, so this cannot be placed on the map. Please choose a nearby barangay."
+            : "Unknown barangay: $barangay_name",
+        "field" => "barangayName",
+        "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+    ]);
+    exit;
+}
+
+$barangay_id = $barangay["id"];
+$latitude  = $barangay["latitude"];
+$longitude = $barangay["longitude"];
+
+if (
+    isset($data["latitude"], $data["longitude"])
+    && is_numeric($data["latitude"]) && is_numeric($data["longitude"])
+) {
+    $pinLat = (float)$data["latitude"];
+    $pinLng = (float)$data["longitude"];
+
+    if (!is_finite($pinLat) || !is_finite($pinLng)
+        || $pinLat < -90 || $pinLat > 90
+        || $pinLng < -180 || $pinLng > 180) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
+        exit;
+    }
+
+    $latitude  = $pinLat;
+    $longitude = $pinLng;
 }
 
 try {

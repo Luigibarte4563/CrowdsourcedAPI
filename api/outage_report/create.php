@@ -4,7 +4,6 @@ header("Content-Type: application/json");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../config/env.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 
@@ -64,90 +63,71 @@ try {
 }
 
 /* =========================================
-   COORDINATES
-   Prefer an explicit pin dropped on the report form's map; otherwise geocode the
-   typed location name. Same contract as flood_report/create.php.
+   BARANGAY -> COORDINATES
+   The barangay is the coordinate authority; `location_name` is only the label
+   shown to other users. An explicit pin dropped on the form's map refines the
+   point but never replaces the barangay.
    ========================================= */
-if (isset($data["latitude"], $data["longitude"]) && is_numeric($data["latitude"]) && is_numeric($data["longitude"])) {
-    $latitude  = (float)$data["latitude"];
-    $longitude = (float)$data["longitude"];
-
-    // A pin is user input, so reject out-of-range values before they reach the
-    // coverage check below (is_finite also catches "1e999" overflowing to INF).
-    if (!is_finite($latitude) || !is_finite($longitude)
-        || $latitude < -90 || $latitude > 90
-        || $longitude < -180 || $longitude > 180) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
-        exit;
-    }
-} else {
-    $geo = getCoordinates($location_name);
-    if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Unable to resolve location coordinates"]);
-        exit;
-    }
-    $latitude  = (float)$geo["latitude"];
-    $longitude = (float)$geo["longitude"];
-}
-
-/* =========================================
-   BARANGAY RESOLUTION
-   (prefer an explicit barangay_name; otherwise fall back to geo matching)
-========================================= */
 $barangay_name = trim($data["barangay_name"] ?? "");
-$matched_barangay = null;
 
-if ($barangay_name !== "") {
-    $matched_barangay = $barangay_name;
-} else {
-    $known = [
-        ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
-        ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
-        ["name"=>"Bonuan Binloc","lat"=>16.0620,"lng"=>120.3100,"radius"=>4000],
-        ["name"=>"Lucao","lat"=>16.0435,"lng"=>120.3310,"radius"=>2500],
-        ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>2000],
-        ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>2000],
-        ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>2000],
-        ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>2500],
-        ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1500],
-        ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1500]
-    ];
-
-    $input = strtolower($location_name);
-
-    if (str_contains($input, "binloc")) {
-        $matched_barangay = "Bonuan Binloc";
-    } elseif (str_contains($input, "bonuan")) {
-        $matched_barangay = "Bonuan Gueset";
-    } elseif (str_contains($input, "lucao")) {
-        $matched_barangay = "Lucao";
-    } else {
-        $bestMatch = null;
-        $bestDistance = PHP_FLOAT_MAX;
-        foreach ($known as $b) {
-            $distance = haversineDistanceMeters($latitude, $longitude, $b["lat"], $b["lng"]);
-            if ($distance <= $b["radius"] && $distance < $bestDistance) {
-                $bestDistance = $distance;
-                $bestMatch = $b["name"];
-            }
-        }
-        $matched_barangay = $bestMatch;
-    }
-}
-
-if (!$matched_barangay) {
-    http_response_code(403);
+if ($barangay_name === "") {
+    http_response_code(400);
     echo json_encode([
         "success" => false,
-        "message" => "Outside coverage area",
-        "debug" => ["input" => $location_name, "lat" => $latitude, "lng" => $longitude]
+        "message" => "barangay_name is required",
+        "field" => "barangayName"
     ]);
     exit;
 }
 
-$barangay_id = resolveBarangay($conn, $matched_barangay);
+$barangay = resolveBarangayCoords($conn, $barangay_name);
+
+if (!$barangay) {
+    // Tell apart "that barangay does not exist" from "it exists but nobody has
+    // entered its coordinates yet" - the second is a server-side data gap and
+    // must not read as the user's mistake.
+    $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+    $existsStmt->execute([$barangay_name]);
+    $exists = (bool)$existsStmt->fetchColumn();
+
+    http_response_code($exists ? 503 : 400);
+    echo json_encode([
+        "success" => false,
+        "message" => $exists
+            ? "We do not have map coordinates for $barangay_name yet, so this report cannot be placed on the map. Please choose a nearby barangay."
+            : "Unknown barangay: $barangay_name",
+        "field" => "barangayName",
+        "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+    ]);
+    exit;
+}
+
+$barangay_id = $barangay["id"];
+
+// The barangay centroid is the default point; an explicit pin refines it.
+$latitude  = $barangay["latitude"];
+$longitude = $barangay["longitude"];
+
+if (
+    isset($data["latitude"], $data["longitude"])
+    && is_numeric($data["latitude"]) && is_numeric($data["longitude"])
+) {
+    $pinLat = (float)$data["latitude"];
+    $pinLng = (float)$data["longitude"];
+
+    // A pin is user input, so reject nonsense before it is stored (is_finite
+    // also catches "1e999" overflowing to INF).
+    if (!is_finite($pinLat) || !is_finite($pinLng)
+        || $pinLat < -90 || $pinLat > 90
+        || $pinLng < -180 || $pinLng > 180) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
+        exit;
+    }
+
+    $latitude  = $pinLat;
+    $longitude = $pinLng;
+}
 
 /* =========================================
    LOOKUP FIELDS (strings -> normalized ids)
@@ -222,7 +202,7 @@ try {
         "success" => true,
         "message" => "Report created",
         "report_id" => $outage_report_id,
-        "barangay" => $matched_barangay
+        "barangay" => $barangay["name"]
     ]);
 } catch (PDOException $e) {
     http_response_code(500);

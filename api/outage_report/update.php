@@ -7,7 +7,6 @@ ini_set('display_errors', 0);
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
 
 try {
@@ -65,15 +64,40 @@ try {
     $longitude = (float)$report["longitude"];
     $barangay_id = $report["barangay_id"];
 
-    /* ================= GEO + BARANGAY UPDATE =================
-       An explicit pin from the form's map wins. Otherwise re-geocode only when
-       the location name actually changed, so an unrelated edit (severity,
-       description, ...) never moves the report. */
-    $has_pin = isset($data["latitude"], $data["longitude"])
-        && is_numeric($data["latitude"]) && is_numeric($data["longitude"]);
-    $name_changed = !empty($data["location_name"]) && $data["location_name"] !== $report["location_name"];
+/* ================= BARANGAY + COORDINATES =================
+       The chosen barangay supplies the point; an explicit pin refines it. An
+       unrelated edit (severity, description, ...) leaves both untouched, so
+       editing a report never silently moves it. */
+    if (!empty($data["barangay_name"])) {
+        $requestedBarangay = trim($data["barangay_name"]);
+        $barangay = resolveBarangayCoords($conn, $requestedBarangay);
 
-    if ($has_pin) {
+        if (!$barangay) {
+            $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+            $existsStmt->execute([$requestedBarangay]);
+            $exists = (bool)$existsStmt->fetchColumn();
+
+            http_response_code($exists ? 503 : 400);
+            echo json_encode([
+                "success" => false,
+                "message" => $exists
+                    ? "We do not have map coordinates for $requestedBarangay yet."
+                    : "Unknown barangay: $requestedBarangay",
+                "field" => "barangayName",
+                "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+            ]);
+            exit;
+        }
+
+        $barangay_id = $barangay["id"];
+        $latitude  = $barangay["latitude"];
+        $longitude = $barangay["longitude"];
+    }
+
+    if (
+        isset($data["latitude"], $data["longitude"])
+        && is_numeric($data["latitude"]) && is_numeric($data["longitude"])
+    ) {
         $pin_lat = (float)$data["latitude"];
         $pin_lng = (float)$data["longitude"];
 
@@ -89,23 +113,6 @@ try {
 
         $latitude = $pin_lat;
         $longitude = $pin_lng;
-
-        if (!empty($data["barangay_name"])) {
-            $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
-        }
-    } elseif ($name_changed) {
-        $geo = getCoordinates($location_name);
-        if (!$geo || empty($geo["latitude"]) || empty($geo["longitude"])) {
-            http_response_code(400);
-            echo json_encode(["success" => false, "message" => "Invalid location (geocoding failed)"]);
-            exit;
-        }
-        $latitude = (float)$geo["latitude"];
-        $longitude = (float)$geo["longitude"];
-
-        if (!empty($data["barangay_name"])) {
-            $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
-        }
     }
 
     $stmt = $conn->prepare("

@@ -90,6 +90,12 @@ function getStationTypeNameById(PDO $conn, $typeId) {
 
 /**
  * Finds or creates a barangay row by name and returns its id.
+ *
+ * DANGER: this INSERTS an unknown name. Do not use it to validate or compare a
+ * name against existing rows - asking "does this barangay already have a
+ * maintenance?" would then silently add the barangay to the city. Use
+ * `findBarangayId()` for that, or `resolveBarangayCoords()` when a point is
+ * needed too.
  */
 function resolveBarangay(PDO $conn, ?string $barangayName) {
     $name = trim((string)$barangayName);
@@ -107,6 +113,110 @@ function resolveBarangay(PDO $conn, ?string $barangayName) {
     $stmt = $conn->prepare("INSERT INTO barangays (barangay_name) VALUES (?)");
     $stmt->execute([$name]);
     return (int)$conn->lastInsertId();
+}
+
+/**
+ * Looks up a barangay's stored coordinates. NEVER creates a row.
+ *
+ * This is the only source of a record's position now that the barangay is the
+ * coordinate authority: an address is a label, not something to geocode. A
+ * report's point is the chosen barangay's centroid, optionally refined by an
+ * explicit pin the user dropped on the map.
+ *
+ * Returns null when the name is empty, matches no row, or matches a row whose
+ * coordinates are still NULL - the distinction matters, because
+ * `resolveBarangay()` above would happily INSERT an unknown name and hand back
+ * a brand-new barangay with no coordinates, which used to be harmless (the
+ * geocoder supplied the point) and is now a silent dead end.
+ *
+ * Lookups are case-insensitive on the second attempt: the client submits the
+ * name straight from `reference/get.php`, but a hand-typed "poblacion oeste"
+ * should not become a 400.
+ *
+ * @return array{id:int, name:string, latitude:float, longitude:float}|null
+ */
+function resolveBarangayCoords(PDO $conn, ?string $barangayName) {
+    $name = trim((string)$barangayName);
+    if ($name === '') {
+        return null;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT id, barangay_name, latitude, longitude
+         FROM barangays
+         WHERE barangay_name = ?
+         LIMIT 1"
+    );
+    $stmt->execute([$name]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        $stmt = $conn->prepare(
+            "SELECT id, barangay_name, latitude, longitude
+             FROM barangays
+             WHERE LOWER(barangay_name) = LOWER(?)
+             LIMIT 1"
+        );
+        $stmt->execute([$name]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    if (!$row || $row['latitude'] === null || $row['longitude'] === null) {
+        return null;
+    }
+
+    return [
+        "id" => (int)$row['id'],
+        "name" => $row['barangay_name'],
+        "latitude" => (float)$row['latitude'],
+        "longitude" => (float)$row['longitude'],
+    ];
+}
+
+/**
+ * Names the barangays that still have no coordinates, for an actionable error.
+ * Cached per request via a static so a page that resolves several records does
+ * not re-query for every one.
+ */
+function barangaysMissingCoordinates(PDO $conn) {
+    static $missing = null;
+    if ($missing !== null) {
+        return $missing;
+    }
+
+    $stmt = $conn->query(
+        "SELECT barangay_name FROM barangays
+         WHERE latitude IS NULL OR longitude IS NULL
+         ORDER BY barangay_name"
+    );
+    return $missing = $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * Looks up a barangay id by name. NEVER creates a row.
+ *
+ * `resolveBarangay()` above inserts when the name is unknown, which is wrong
+ * for any caller that only wants to COMPARE against existing rows: asking
+ * whether a barangay already has a maintenance would otherwise quietly add it
+ * to the city.
+ */
+function findBarangayId(PDO $conn, ?string $barangayName) {
+    $name = trim((string)$barangayName);
+    if ($name === '') {
+        return null;
+    }
+
+    $stmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+    $stmt->execute([$name]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        $stmt = $conn->prepare("SELECT id FROM barangays WHERE LOWER(barangay_name) = LOWER(?) LIMIT 1");
+        $stmt->execute([$name]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    return $row ? (int)$row['id'] : null;
 }
 
 /**

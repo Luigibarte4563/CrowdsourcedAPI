@@ -106,6 +106,7 @@ CrowdsourcedAPI/
 │   └── google_oauth.php
 ├── config/
 │   ├── env.php                 # loads .env via phpdotenv
+│   ├── cors.php                # Access-Control-* headers, allow-list from .env
 │   └── db_connect.php          # PDO connection factory
 ├── database/
 │   └── powerguidedagupan.sql   # canonical normalized schema + seed data
@@ -137,8 +138,9 @@ CrowdsourcedAPI/
    composer install
    ```
 
-3. **Create `.env`** (see [Configuration](#configuration-env)). A `.env` file is
-   expected by `config/env.php`.
+3. **Create `.env`**: copy `.env.example` to `.env` and fill it in (see
+   [Configuration](#configuration-env)). A `.env` file is expected by
+   `config/env.php`, and it is gitignored, so every machine makes its own.
 
 4. **Make sure MySQL/MariaDB is running**, then import the database (see next
    section).
@@ -314,6 +316,36 @@ the caller comes from the JWT alone. Full reference in
   `status`) are resolved to ids server-side against the lookup tables. See
   `GET /api/reference/get.php` for valid values.
 
+### Coordinate model (barangay-sourced)
+
+Every report, hazard, flood, power station and saved location is placed on the
+map by its **barangay's stored centroid**. The `barangays` table holds
+`latitude`/`longitude` for each barangay (filled by
+`database/fill_barangay_coordinates.php` and baked into
+`database/003_barangay_coordinates.sql`). The client selects a barangay, the
+API reads the stored centroid, and an optional map pin may refine the point.
+The free-text `location_name` / `address` field is only a label shown to other
+users; it is **never geocoded**.
+
+Endpoints that accept `barangay_name` (now required) and optional
+`latitude`/`longitude`:
+
+| Endpoint | Required | Optional refine |
+|---|---|---|
+| `outage_report/create.php` | `barangay_name` | `latitude`, `longitude` |
+| `outage_report/update.php` | (unchanged) | `barangay_name`, `latitude`, `longitude` |
+| `flood_report/create.php` | `barangay_name` | `latitude`, `longitude` |
+| `electrical_hazard/create.php` | `barangay_name` | `latitude`, `longitude` |
+| `power_station/create.php` | `barangay_name` | `latitude`, `longitude` |
+| `power_station/update.php` | (unchanged) | `barangay_name`, `latitude`, `longitude` |
+| `user_location/location.php` | `barangay_name` | — |
+| `maintenance/create.php` | `barangays[]` (names) | — |
+| `maintenance/update.php` | `barangays[]` (names) | — |
+
+A barangay with NULL coordinates is rejected with **503** and the full list of
+missing barangays. An unknown barangay name is **400**. Omitting `barangay_name`
+is **400**.
+
 ---
 
 ## Endpoint Reference
@@ -362,14 +394,70 @@ JWT_SECRET_KEY=your_secret_at_least_32_chars
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_REDIRECT_URI=http://localhost/CrowdsourcedAPI/api/auth/google_callback.php
+
+FRONTEND_URL=http://localhost:5174
+
+# ALLOWED_ORIGINS is commented out by default - see the CORS section below.
+# ALLOWED_ORIGINS=http://localhost:5174,http://127.0.0.1:5174
 ```
 
 | Key | Purpose |
 |-----|---------|
 | `DB_*` | PDO connection (see `config/db_connect.php`) |
-| `GEOAPIFY_GEOCODING_API_KEY` | Geocodes location strings into lat/lng |
-| `JWT_SECRET_KEY` | Signs/verifies JWTs (HS256) — use a long random value |
-| `GOOGLE_CLIENT_ID` / `_SECRET` / `GOOGLE_REDIRECT_URI` | Google OAuth. **Placeholders — fill in real values** before enabling Google sign-in |
+| `GEOAPIFY_GEOCODING_API_KEY` | **Only used by `database/fill_barangay_coordinates.php`** — a one-off backfill script. The API no longer geocodes addresses; coordinates come from the `barangays` table. |
+| `JWT_SECRET_KEY` | Signs/verifies JWTs (HS256) - use a long random value |
+| `GOOGLE_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Google OAuth. **Placeholders - fill in real values** before enabling Google sign-in |
+| `FRONTEND_URL` | Where `google_callback.php` redirects the browser. **Not a CORS setting** |
+| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call this API cross-origin. Optional - a default localhost list is built in |
+
+`.env` is gitignored, so every machine needs its own copy made from
+`.env.example`. A missing `.env` is a hard failure (`config/env.php` throws) —
+`cors.php` includes that file before it can emit any header, and an API that
+answers 500 looks exactly like "CORS is broken" in the browser console.
+
+### CORS
+
+`config/cors.php` is included at the top of every endpoint and is the only place
+`Access-Control-*` headers are set. It matters only when the browser calls the
+API **cross-origin**, i.e. when the frontend's `VITE_API_BASE_URL` is an absolute
+URL such as `http://localhost/CrowdsourcedAPI` instead of the proxied relative
+path `/CrowdsourcedAPI`.
+
+The frontend ships with the proxied relative path precisely so this file has
+nothing to do in normal development: a same-origin request carries no `Origin`
+header at all and needs no CORS headers back.
+
+When it is involved, three constraints shape the implementation:
+
+- **Exact-match allow-list.** `HTTP_ORIGIN` is compared against the list and the
+  header is only sent on a hit. A miss means *no* `Access-Control-Allow-Origin`
+  header at all, which is what the browser reports as a CORS error.
+- **`*` is not an option.** The JWT session is an HttpOnly `jwt_token` cookie
+  sent with `credentials: 'include'`, so the response must name one exact origin.
+- **`FRONTEND_URL` does nothing here.** It is the OAuth redirect target. Editing
+  it will not change CORS; `ALLOWED_ORIGINS` is the only knob.
+
+Defaults, used when `ALLOWED_ORIGINS` is unset:
+
+```
+http://localhost:5174, http://127.0.0.1:5174, http://localhost:5173, http://127.0.0.1:5173
+```
+
+Setting `ALLOWED_ORIGINS` **replaces** those four rather than extending them, so
+opening the dev server over the LAN (`http://192.168.1.20:5174`) means listing
+that origin explicitly.
+
+To see what a browser would see:
+
+```bash
+curl -i -H "Origin: http://localhost:5174" \
+  http://localhost/CrowdsourcedAPI/api/reference/get.php
+# -> Access-Control-Allow-Origin: http://localhost:5174
+
+curl -i -H "Origin: http://192.168.1.20:5174" \
+  http://localhost/CrowdsourcedAPI/api/reference/get.php
+# -> no Access-Control-Allow-Origin: the origin is not in the allow-list
+```
 
 ---
 

@@ -63,14 +63,34 @@ try {
         ":user_id" => $user_id
     ]);
 
-    /* check if anything was updated */
+    /*
+       $stmt->rowCount() counts rows CHANGED, not rows matched, so MySQL reports
+       0 when the row already had is_read = 1. Treating that as "not found" made
+       reading the same notification twice answer 404, which the UI surfaced as
+       an error even though nothing was wrong - two open tabs, or an optimistic
+       update that already flipped the flag, hit it routinely. Marking as read is
+       idempotent, so a repeat call is a success, not a failure.
+    */
     if ($stmt->rowCount() === 0) {
-        http_response_code(404);
-        echo json_encode([
-            "success" => false,
-            "message" => "Notification not found or already updated"
+        $owns = $conn->prepare("
+            SELECT is_read FROM notifications
+            WHERE id = :id AND user_id = :user_id
+            LIMIT 1
+        ");
+        $owns->execute([
+            ":id" => $notification_id,
+            ":user_id" => $user_id
         ]);
-        exit;
+
+        if (!$owns->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(404);
+            echo json_encode([
+                "success" => false,
+                "message" => "Notification not found"
+            ]);
+            exit;
+        }
+        /* Row exists and is already read - fall through and report success. */
     }
 
     echo json_encode([

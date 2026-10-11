@@ -48,7 +48,7 @@ try {
 
         $barangayId = (int)$found;
     } else {
-        $barangayId = resolveBarangay($conn, $barangay);
+        $barangayId = findBarangayId($conn, $barangay);
     }
 
     $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";

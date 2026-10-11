@@ -6,7 +6,6 @@ header("Content-Type: application/json");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
 
 $conn = getConnection();
@@ -42,49 +41,47 @@ if ($address === "") {
     exit;
 }
 
-/* GEOCODE */
-try {
-    $geo = getCoordinates($address);
-} catch (Throwable $e) {
-    $geo = null;
-}
+/* =========================================
+   BARANGAY -> COORDINATES
+   The barangay supplies the point; `address` is the label the user sees and is
+   never geocoded. This is what "nearby" lookups centre on, so a wrong point
+   would silently mis-rank every result.
+   ========================================= */
+$barangay_name = trim($data["barangay_name"] ?? "");
 
-if (!$geo || !$geo["success"]) {
-    http_response_code(404);
-    echo json_encode(["success" => false, "message" => "Location not found"]);
+if ($barangay_name === "") {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "barangay_name is required",
+        "field" => "barangayName"
+    ]);
     exit;
 }
 
-$latitude  = (float)$geo["latitude"];
-$longitude = (float)$geo["longitude"];
+$barangay = resolveBarangayCoords($conn, $barangay_name);
 
-/* BARANGAY (optional explicit override, else geo matching) */
-$barangay_name = trim($data["barangay_name"] ?? "");
-$barangay_id = null;
+if (!$barangay) {
+    $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+    $existsStmt->execute([$barangay_name]);
+    $exists = (bool)$existsStmt->fetchColumn();
 
-if ($barangay_name !== "") {
-    $barangay_id = resolveBarangay($conn, $barangay_name);
-} else {
-    $known = [
-        ["name"=>"Bonuan Gueset","lat"=>16.0585,"lng"=>120.3345,"radius"=>2500],
-        ["name"=>"Bonuan Boquig","lat"=>16.0600,"lng"=>120.3200,"radius"=>2000],
-        ["name"=>"Bonuan Binloc","lat"=>16.0620,"lng"=>120.3100,"radius"=>2000],
-        ["name"=>"Lucao","lat"=>16.0435,"lng"=>120.3310,"radius"=>1800],
-        ["name"=>"Tapuac","lat"=>16.0460,"lng"=>120.3450,"radius"=>1800],
-        ["name"=>"Tambac","lat"=>16.0520,"lng"=>120.3400,"radius"=>1500],
-        ["name"=>"Pantal","lat"=>16.0468,"lng"=>120.3330,"radius"=>1500],
-        ["name"=>"Mayombo","lat"=>16.0480,"lng"=>120.3100,"radius"=>1500],
-        ["name"=>"Poblacion Oeste","lat"=>16.0420,"lng"=>120.3355,"radius"=>1200],
-        ["name"=>"Poblacion Este","lat"=>16.0425,"lng"=>120.3385,"radius"=>1200]
-    ];
-    foreach ($known as $b) {
-        if (haversineDistanceMeters($latitude, $longitude, $b["lat"], $b["lng"]) <= $b["radius"]) {
-            $barangay_id = resolveBarangay($conn, $b["name"]);
-            $barangay_name = $b["name"];
-            break;
-        }
-    }
+    http_response_code($exists ? 503 : 400);
+    echo json_encode([
+        "success" => false,
+        "message" => $exists
+            ? "We do not have map coordinates for $barangay_name yet, so we cannot save your location. Please choose a nearby barangay."
+            : "Unknown barangay: $barangay_name",
+        "field" => "barangayName",
+        "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+    ]);
+    exit;
 }
+
+$barangay_id = $barangay["id"];
+$barangay_name = $barangay["name"];
+$latitude  = $barangay["latitude"];
+$longitude = $barangay["longitude"];
 
 /* UPSERT user_locations (is_primary) */
 try {

@@ -4,7 +4,6 @@ header("Content-Type: application/json");
 
 require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
 
 $conn = getConnection();
@@ -91,40 +90,64 @@ $operating_hours = $data["operating_hours"] ?? $station["operating_hours"];
 $charging_type = $data["charging_type"] ?? $station["charging_type"];
 $description = $data["description"] ?? $station["description"];
 
-/* COORDINATES */
-$latitude = $data["latitude"] ?? null;
-$longitude = $data["longitude"] ?? null;
+/* =========================================
+   COORDINATES
+   A supplied barangay supplies the point (its stored centroid); an explicit pin
+   refines it. With neither, the stored point is kept - this is a partial
+   update, and re-resolving an address nobody touched is not the client's call.
+   ========================================= */
+$barangay_id = $station["barangay_id"];
+$latitude  = $station["latitude"];
+$longitude = $station["longitude"];
 
-if ($latitude === null || $longitude === null) {
-    if ($location_name !== $station["location_name"]) {
-        $geo = getCoordinates($location_name);
-        if (!$geo["success"]) {
-            http_response_code(400);
-            echo json_encode(["success" => false, "message" => $geo["message"]]);
-            exit;
-        }
-        $latitude = $geo["latitude"];
-        $longitude = $geo["longitude"];
-    } else {
-        $latitude = $station["latitude"];
-        $longitude = $station["longitude"];
+if (!empty($data["barangay_name"])) {
+    $requestedBarangay = trim($data["barangay_name"]);
+    $barangay = resolveBarangayCoords($conn, $requestedBarangay);
+
+    if (!$barangay) {
+        $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+        $existsStmt->execute([$requestedBarangay]);
+        $exists = (bool)$existsStmt->fetchColumn();
+
+        http_response_code($exists ? 503 : 400);
+        echo json_encode([
+            "success" => false,
+            "message" => $exists
+                ? "We do not have map coordinates for $requestedBarangay yet."
+                : "Unknown barangay: $requestedBarangay",
+            "field" => "barangayName",
+            "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+        ]);
+        exit;
     }
+
+    $barangay_id = $barangay["id"];
+    $latitude  = $barangay["latitude"];
+    $longitude = $barangay["longitude"];
 }
 
-if (!is_numeric($latitude) || !is_numeric($longitude)) {
-    http_response_code(400);
-    echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
-    exit;
+if (
+    isset($data["latitude"], $data["longitude"])
+    && is_numeric($data["latitude"]) && is_numeric($data["longitude"])
+) {
+    $pinLat = (float)$data["latitude"];
+    $pinLng = (float)$data["longitude"];
+
+    if (!is_finite($pinLat) || !is_finite($pinLng)
+        || $pinLat < -90 || $pinLat > 90 || $pinLng < -180 || $pinLng > 180) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Invalid coordinates"]);
+        exit;
+    }
+
+    $latitude  = $pinLat;
+    $longitude = $pinLng;
 }
 
 $latitude = (float)$latitude;
 $longitude = (float)$longitude;
 
 try {
-    $barangay_id = null;
-    if (!empty($data["barangay_name"])) {
-        $barangay_id = resolveBarangay($conn, $data["barangay_name"]);
-    }
 
     $stmt = $conn->prepare("
         UPDATE power_stations SET

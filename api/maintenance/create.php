@@ -6,8 +6,8 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../services/create_notification.php';
-require_once __DIR__ . '/../services/get_coordinates.php';
 require_once __DIR__ . '/../services/lookup.php';
+require_once __DIR__ . '/../services/maintenance_notice.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -61,7 +61,7 @@ try {
 
     $blocked = [];
     foreach ($barangays as $b) {
-        $bid = resolveBarangay($conn, $b);
+        $bid = findBarangayId($conn, $b);
         if ($bid !== null && in_array($bid, $existingBarangayIds, true)) {
             $blocked[] = $b;
         }
@@ -101,48 +101,81 @@ try {
        INSERT LOCATIONS (barangay_id based)
     ========================================= */
     $barangayCoords = [];
-    $locInsert = $conn->prepare("
+    $insertLoc = $conn->prepare("
         INSERT INTO maintenance_locations (maintenance_id, barangay_id, latitude, longitude)
         VALUES (:maintenance_id, :barangay_id, :lat, :lng)
     ");
 
-    foreach ($barangays as $b) {
-        $barangayId = resolveBarangay($conn, $b);
-        if ($barangayId === null) continue;
+/* Resolve every chosen barangay up front, so a typo fails loudly instead of
+       silently dropping that barangay from the affected area, and so a known
+       barangay with no coordinates is reported rather than stored as a point
+       nothing can draw. */
+    $resolvedLocations = [];
+    $missingCoords = [];
 
-        $lat = null;
-        $lng = null;
-        try {
-            $geo = getCoordinates($b);
-            if ($geo['success'] ?? false) {
-                $lat = (float)$geo['latitude'];
-                $lng = (float)$geo['longitude'];
+    foreach ($barangays as $chosen) {
+        $chosen = trim((string)$chosen);
+        if ($chosen === '') continue;
+
+        $barangay = resolveBarangayCoords($conn, $chosen);
+
+        if (!$barangay) {
+            $existsStmt = $conn->prepare("SELECT id FROM barangays WHERE barangay_name = ? LIMIT 1");
+            $existsStmt->execute([$chosen]);
+
+            if ($existsStmt->fetchColumn()) {
+                $missingCoords[] = $chosen;
+            } else {
+                http_response_code(400);
+                echo json_encode([
+                    "success" => false,
+                    "message" => "Unknown barangay: $chosen",
+                    "field" => "barangays"
+                ]);
+                exit;
             }
-        } catch (Throwable $e) {
-            $lat = null;
-            $lng = null;
+            continue;
         }
 
-        $barangayCoords[$b] = ['lat' => $lat, 'lng' => $lng];
+        $resolvedLocations[$chosen] = $barangay;
+    }
 
-        $locInsert->execute([
+    if ($missingCoords) {
+        http_response_code(503);
+        echo json_encode([
+            "success" => false,
+            "message" => "No map coordinates yet for: " . implode(", ", $missingCoords) . ". The maintenance map cannot be drawn until these are added.",
+            "field" => "barangays",
+            "barangays_without_coordinates" => barangaysMissingCoordinates($conn)
+        ]);
+        exit;
+    }
+
+    foreach ($resolvedLocations as $chosen => $barangay) {
+        $barangayCoords[$chosen] = [
+            'lat' => $barangay["latitude"],
+            'lng' => $barangay["longitude"]
+        ];
+
+        $insertLoc->execute([
             ":maintenance_id" => $maintenance_id,
-            ":barangay_id" => $barangayId,
-            ":lat" => $lat,
-            ":lng" => $lng
+            ":barangay_id" => $barangay["id"],
+            ":lat" => $barangay["latitude"],
+            ":lng" => $barangay["longitude"]
         ]);
     }
 
     /* =========================================
-       NOTIFY AFFECTED USERS (near maintenance)
+       NOTIFY RESIDENTS (message says whether they are in range)
     ========================================= */
     $notified = 0;
 
     $userStmt = $conn->prepare("
-        SELECT u.id, ul.latitude, ul.longitude
+        SELECT u.id, ul.latitude, ul.longitude, b.barangay_name AS user_barangay
         FROM users u
         JOIN roles r ON r.id = u.role_id
         LEFT JOIN user_locations ul ON ul.user_id = u.id AND ul.is_primary = 1
+        LEFT JOIN barangays b ON b.id = ul.barangay_id
         WHERE r.role_name = 'user'
     ");
     $userStmt->execute();
@@ -156,7 +189,13 @@ try {
     $formattedDate  = date("F d, Y", strtotime($maintenance_date));
     $formattedStart = date("h:i A", strtotime($start_time));
     $formattedEnd   = date("h:i A", strtotime($end_time));
-    $allBarangays   = implode(", ", $barangays);
+    /* Lower-cased lookup so a resident whose saved barangay is on the schedule
+       counts as affected even when their pin sits farther than `radius` from the
+       barangay's centroid. */
+    $barangayByLower = [];
+    foreach (array_keys($barangayCoords) as $name) {
+        $barangayByLower[strtolower($name)] = $name;
+    }
 
     foreach ($users as $u) {
         if (empty($u['latitude']) || empty($u['longitude'])) continue;
@@ -169,14 +208,24 @@ try {
             }
         }
 
-        $message = "Power Interruption Notice\n\n"
-            . "Affected: {$allBarangays}\n"
-            . "Your Area: " . (!empty($affected) ? implode(", ", $affected) : $allBarangays) . "\n"
-            . "Date: {$formattedDate}\n"
-            . "Time: {$formattedStart} - {$formattedEnd}\n\n"
-            . $company_name;
+        $userBarangay = trim((string)($u['user_barangay'] ?? ''));
+        if ($userBarangay !== '' && isset($barangayByLower[strtolower($userBarangay)])) {
+            $affected[] = $barangayByLower[strtolower($userBarangay)];
+        }
+        $affected = array_values(array_unique($affected));
 
-        createNotification($conn, [$u['id']], "Scheduled Power Maintenance", $message, "maintenance", $maintenance_id, "maintenance");
+        $copy = maintenanceNotificationCopy(
+            'scheduled',
+            $barangays,
+            $affected,
+            $userBarangay !== '' ? $userBarangay : null,
+            $formattedDate,
+            "{$formattedStart} - {$formattedEnd}",
+            $description !== '' ? $description : null,
+            $company_name
+        );
+
+        createNotification($conn, [$u['id']], $copy['title'], $copy['message'], "maintenance", $maintenance_id, "maintenance");
         $notified++;
     }
 

@@ -1087,43 +1087,50 @@ ON lineman_assignments(barangay_id);
 -- 29. DAGUPAN CITY BARANGAYS
 -- =========================================================
 
-INSERT INTO barangays (barangay_name) VALUES
-('Bacayao Norte'),
-('Bacayao Sur'),
-('Bacag'),
-('Balsadan'),
-('Barangay I'),
-('Barangay II'),
-('Barangay III'),
-('Barangay IV'),
-('Bolosan'),
-('Bonuan Binloc'),
-('Bonuan Boquig'),
-('Bonuan Gueset'),
-('Calmay'),
-('Carael'),
-('Caranglaan'),
-('Dapdap'),
-('Dumalneg'),
-('Herrero'),
-('Lasip Chico'),
-('Lasip Grande'),
-('Lomboy'),
-('Lucao'),
-('Malued'),
-('Mamalingling'),
-('Mangin'),
-('Mayombo'),
-('Pantal'),
-('Poblacion Oeste'),
-('Poblacion Este'),
-('Salapingao'),
-('Salisay'),
-('Sapanglang'),
-('Tambac'),
-('Tebeng'),
-('Tippler'),
-('Tapuac');
+-- Coordinates make the barangay the source of truth for a record's position:
+-- a report's point is its barangay's centroid, and the address text is only a
+-- label. See database/003_barangay_coordinates.sql for how they were resolved
+-- and for the 11 barangays still awaiting a hand-entered value - those are left
+-- NULL here on purpose rather than guessed at, and the API rejects a report in
+-- a barangay whose coordinates are missing.
+INSERT INTO barangays (barangay_name, latitude, longitude) VALUES
+('Bacayao Norte', 16.0321184, 120.343659),
+('Bacayao Sur', 16.0224982, 120.3460497),
+('Bacag', NULL, NULL),
+('Balsadan', NULL, NULL),
+('Barangay I', NULL, NULL),
+('Barangay II', NULL, NULL),
+('Barangay III', NULL, NULL),
+('Barangay IV', NULL, NULL),
+('Bolosan', 16.0470283, 120.3653888),
+('Bonuan Binloc', 16.1019298, 120.3797034),
+('Bonuan Boquig', 16.0774984, 120.3580251),
+('Bonuan Gueset', 16.0753807, 120.3431786),
+('Calmay', 16.0452879, 120.325569),
+('Carael', 16.05, 120.31667),
+('Caranglaan', 16.0306481, 120.3499153),
+('Dapdap', NULL, NULL),
+('Dumalneg', NULL, NULL),
+('Herrero', 16.0439297, 120.3422628),
+('Lasip Chico', 16.0216379, 120.3402722),
+('Lasip Grande', 16.0286206, 120.3432008),
+('Lomboy', 16.0548499, 120.3248795),
+('Lucao', 16.0204862, 120.3226274),
+('Malued', 16.0292908, 120.3351235),
+('Mamalingling', 16.0534043, 120.3615684),
+('Mangin', 16.0388765, 120.3673354),
+('Mayombo', 16.0418406, 120.346308),
+('Pantal', 16.0461741, 120.3387457),
+('Poblacion', 16.0432792, 120.3295612),
+('Poblacion Oeste', 16.0432792, 120.3295612),
+('Poblacion Este', NULL, NULL),
+('Salapingao', 16.0589914, 120.3217036),
+('Salisay', 16.0423396, 120.3714122),
+('Sapanglang', NULL, NULL),
+('Tambac', 16.046036, 120.3563194),
+('Tebeng', 16.0320226, 120.3588773),
+('Tippler', NULL, NULL),
+('Tapuac', 16.0323968, 120.3302149);
 
 
 -- =========================================================

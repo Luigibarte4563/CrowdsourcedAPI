@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/env.php';
+/* Every DB-backed endpoint loads this file, so wiring CORS here gives them all
+ * consistent Access-Control headers without a per-file require. cors.php is
+ * require_once-safe and a no-op for same-origin requests and CLI scripts. */
+require_once __DIR__ . '/cors.php';
 
 function getConnection() {
     $host = $_ENV['DB_HOST'];
