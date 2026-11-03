@@ -15,7 +15,7 @@ require_once __DIR__ . '/../services/maintenance_notice.php';
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-$user = requireRole(requireAuthUser(), ['electric_company', 'admin']);
+$user = requireRole(requireAuthUser(), ['electric_company', 'admin', 'lineman']);
 
 try {
     $data = json_decode(file_get_contents("php://input"), true);
@@ -36,6 +36,68 @@ try {
 
     if ($maintenance_id <= 0) {
         throw new Exception("Invalid maintenance ID");
+    }
+
+    /* ============ LINEMAN: STATUS-ONLY PROGRESS UPDATES ============
+       A lineman whose assignment covers one of this schedule's barangays (work_type
+       'maintenance' or 'both') may move the schedule's STATUS - e.g. to 'ongoing' or
+       'completed' - but may not re-plan it. Enforced here because rbac.php cannot
+       express "owns one field of one covered row":
+         1. the body may carry nothing but maintenance_id + status;
+         2. an active assignment with the right work type must cover the schedule.
+       Only the status column is written - date, times, description, radius and the
+       location list are left exactly as the company set them. No resident
+       notifications are re-sent: the notice copy is built around the editor's
+       company name, and the company's create/update already announced the schedule. */
+    if (hasRole($user, ['lineman'])) {
+        foreach (['maintenance_date', 'start_time', 'end_time', 'description', 'radius', 'barangays'] as $planningField) {
+            if (array_key_exists($planningField, $data) && $data[$planningField] !== null && $data[$planningField] !== '') {
+                http_response_code(403);
+                echo json_encode([
+                    "success" => false,
+                    "message" => "Linemen can only update the maintenance status"
+                ]);
+                exit;
+            }
+        }
+
+        if (!in_array($manualStatus, ['upcoming', 'ongoing', 'completed', 'cancelled'], true)) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "A valid status is required"]);
+            exit;
+        }
+
+        $coverStmt = $conn->prepare("
+            SELECT 1
+            FROM maintenance_locations ml
+            JOIN lineman_assignments la ON la.barangay_id = ml.barangay_id
+            WHERE ml.maintenance_id = ?
+              AND la.lineman_id = ?
+              AND la.status = 'active'
+              AND la.work_type IN ('maintenance', 'both')
+            LIMIT 1
+        ");
+        $coverStmt->execute([$maintenance_id, (int)$user['id']]);
+        if (!$coverStmt->fetchColumn()) {
+            http_response_code(403);
+            echo json_encode([
+                "success" => false,
+                "message" => "You are not assigned to this maintenance work"
+            ]);
+            exit;
+        }
+
+        $conn->prepare("UPDATE maintenance_schedules SET status = ? WHERE id = ?")
+            ->execute([$manualStatus, $maintenance_id]);
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Maintenance status updated",
+            "maintenance_id" => $maintenance_id,
+            "status" => $manualStatus,
+            "users_notified" => 0
+        ]);
+        exit;
     }
 
     $barangays = $data['barangays'] ?? null;

@@ -70,7 +70,8 @@ $sql = "
         au.last_name  AS assigned_by_last_name,
         la.created_at,
         la.updated_at,
-        la.status
+        la.status,
+        la.work_type
     FROM lineman_assignments la
     JOIN users lu      ON lu.id = la.lineman_id
     JOIN roles lr      ON lr.id = lu.role_id
@@ -118,7 +119,8 @@ try {
                assigned_at because that is what the assignment date means to a reader. */
             "assigned_at"      => $row['created_at'],
             "updated_at"       => $row['updated_at'],
-            "status"           => $row['status']
+            "status"           => $row['status'],
+            "work_type"        => $row['work_type']
         ];
     }
 

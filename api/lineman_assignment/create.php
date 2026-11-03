@@ -88,6 +88,18 @@ if (!$barangay) {
     exit;
 }
 
+/* What the assignment is for. Optional; defaults to 'both', which is what every row
+   written before this column existed effectively meant. */
+$workType = 'both';
+if (isset($data["work_type"]) && $data["work_type"] !== '') {
+    $workType = strtolower(trim((string)$data["work_type"]));
+    if (!in_array($workType, LINEMAN_ASSIGNMENT_WORK_TYPES, true)) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "work_type must be outage, maintenance or both"]);
+        exit;
+    }
+}
+
 /* =========================================
    CREATE OR REACTIVATE
    ========================================= */
@@ -126,16 +138,16 @@ try {
         $assignmentId = (int)$existing['id'];
         $conn->prepare("
             UPDATE lineman_assignments
-            SET status = 'active', assigned_by = ?
+            SET status = 'active', assigned_by = ?, work_type = ?
             WHERE id = ?
-        ")->execute([$assignedBy, $assignmentId]);
+        ")->execute([$assignedBy, $workType, $assignmentId]);
 
         $reactivated = true;
     } else {
         $conn->prepare("
-            INSERT INTO lineman_assignments (lineman_id, barangay_id, assigned_by, status)
-            VALUES (?, ?, ?, 'active')
-        ")->execute([$linemanId, $barangayId, $assignedBy]);
+            INSERT INTO lineman_assignments (lineman_id, barangay_id, assigned_by, status, work_type)
+            VALUES (?, ?, ?, 'active', ?)
+        ")->execute([$linemanId, $barangayId, $assignedBy, $workType]);
 
         $assignmentId = (int)$conn->lastInsertId();
         $reactivated = false;
@@ -174,7 +186,7 @@ try {
    RESPONSE
    ========================================= */
 $readStmt = $conn->prepare("
-    SELECT la.id, la.created_at, la.updated_at, la.status,
+    SELECT la.id, la.created_at, la.updated_at, la.status, la.work_type,
            au.first_name AS ab_first, au.middle_name AS ab_middle, au.last_name AS ab_last
     FROM lineman_assignments la
     JOIN users au ON au.id = la.assigned_by
@@ -199,6 +211,7 @@ echo json_encode([
         "assigned_by_name" => trim($saved['ab_first'] . ' ' . ($saved['ab_middle'] ? $saved['ab_middle'] . ' ' : '') . $saved['ab_last']),
         "assigned_at"      => $saved['created_at'],
         "updated_at"       => $saved['updated_at'],
-        "status"           => $saved['status']
+        "status"           => $saved['status'],
+        "work_type"        => $saved['work_type']
     ]
 ]);

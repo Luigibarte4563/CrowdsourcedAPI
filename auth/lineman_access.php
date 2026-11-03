@@ -29,6 +29,14 @@ const LINEMAN_ASSIGNMENT_ACTIVE = 'active';
 /** Only this status value is accepted from a client. */
 const LINEMAN_ASSIGNMENT_STATUSES = ['active', 'inactive'];
 
+/*
+ * What the assignment is FOR. It now gates access, not just labels it:
+ *   - outage endpoints accept only work_type 'outage' or 'both' (scope SQL above);
+ *   - maintenance STATUS updates accept only work_type 'maintenance' or 'both'
+ *     (maintenance/update.php).
+ */
+const LINEMAN_ASSIGNMENT_WORK_TYPES = ['outage', 'maintenance', 'both'];
+
 /**
  * Whether a request must be limited to the caller's assigned barangays.
  *
@@ -74,6 +82,7 @@ function lineman_scope_sql(PDO $conn, $user, $barangayColumn, array &$params, $p
                 FROM lineman_assignments la
                 WHERE la.lineman_id = :{$prefix}_lineman
                   AND la.status = :{$prefix}_status
+                  AND la.work_type IN ('outage', 'both')
             )";
 }
 
@@ -82,6 +91,9 @@ function lineman_scope_sql(PDO $conn, $user, $barangayColumn, array &$params, $p
  *
  * Used before a verify / update on one specific outage. A lineman with no assignment
  * for the barangay gets false and the caller answers 403; company and admin get true.
+ *
+ * Only assignments whose work type includes outage work ('outage' or 'both') count -
+ * a maintenance-only assignment covers schedules, not outage reports.
  */
 function lineman_can_access_barangay(PDO $conn, $user, $barangayId) {
     if (!lineman_scope_required($user)) {
@@ -99,6 +111,7 @@ function lineman_can_access_barangay(PDO $conn, $user, $barangayId) {
         WHERE lineman_id = ?
           AND barangay_id = ?
           AND status = ?
+          AND work_type IN ('outage', 'both')
         LIMIT 1
     ");
     $stmt->execute([(int)$user['id'], (int)$barangayId, LINEMAN_ASSIGNMENT_ACTIVE]);
