@@ -13,8 +13,20 @@ $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $user_id = (int)requireAuthUser()['id'];
 
 try {
+    /*
+     * Status and remaining time are computed by MySQL (NOW()) - never PHP time().
+     * PHP's clock/timezone differs from the DB session timezone on this stack, so
+     * comparing stored timestamps against PHP time() mislabelled timers.
+     */
     $stmt = $conn->prepare("
-        SELECT t.*, tt.timer_name, tt.default_duration_hours, tt.warning_hours_before, tt.description AS type_description
+        SELECT t.*, tt.timer_name, tt.default_duration_hours, tt.warning_hours_before, tt.description AS type_description,
+            CASE
+                WHEN t.status = 'stopped' THEN 'stopped'
+                WHEN t.expected_expiration_at <= NOW() THEN 'expired'
+                WHEN t.warning_at IS NOT NULL AND t.warning_at <= NOW() THEN 'warning'
+                ELSE 'running'
+            END AS computed_status,
+            GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(), t.expected_expiration_at)) AS remaining_seconds
         FROM safety_timers t
         LEFT JOIN safety_timer_types tt ON tt.id = t.timer_type_id
         WHERE t.user_id = :user_id
@@ -33,17 +45,8 @@ try {
     $statusUpdate = $conn->prepare("UPDATE safety_timers SET status = ? WHERE id = ? AND user_id = ?");
 
     foreach ($timers as &$timer) {
-        $now = time();
-
-        if ($timer['status'] === 'stopped') {
-            $status = 'stopped';
-        } elseif (strtotime($timer['expected_expiration_at']) <= $now) {
-            $status = 'expired';
-        } elseif (!empty($timer['warning_at']) && strtotime($timer['warning_at']) <= $now) {
-            $status = 'warning';
-        } else {
-            $status = 'running';
-        }
+        $status = $timer['computed_status'];
+        unset($timer['computed_status']);
 
         $timer['status'] = $status;
         $statusUpdate->execute([$status, $timer['id'], $user_id]);
@@ -67,7 +70,7 @@ try {
         }
 
         $timer['remaining_seconds'] =
-            $status === 'stopped' ? 0 : max(0, strtotime($timer['expected_expiration_at']) - $now);
+            $status === 'stopped' ? 0 : (int) $timer['remaining_seconds'];
         $timer['timer_id'] = (int)$timer['id'];
     }
     unset($timer);

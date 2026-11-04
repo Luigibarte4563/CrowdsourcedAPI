@@ -64,12 +64,14 @@ try {
         $title = $timer_type_name !== "" ? $timer_type_name : "Safety timer";
     }
 
-    $startedAt = isset($data["started_at"]) ? date("Y-m-d H:i:s", strtotime($data["started_at"])) : date("Y-m-d H:i:s");
-
-    $expectedExpiration = date("Y-m-d H:i:s", strtotime("$startedAt +" . ($durationHours * 3600) . " seconds"));
-    $warningAt = ($warningHours > 0)
-        ? date("Y-m-d H:i:s", strtotime("$expectedExpiration -" . ($warningHours * 3600) . " seconds"))
-        : null;
+    /*
+     * All timer timestamps are computed by MySQL (NOW()) - never PHP date().
+     * PHP's clock/timezone differs from the DB session timezone on this stack,
+     * so rows written from PHP landed hours in the past and every new timer
+     * looked expired the moment it was created.
+     */
+    $durationMinutes = (int) round($durationHours * 60);
+    $warningMinutes  = (int) round($warningHours * 60);
 
     $stmt = $conn->prepare("
         INSERT INTO safety_timers (
@@ -80,25 +82,41 @@ try {
             expected_expiration_at,
             warning_at,
             notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            ?, ?, ?,
+            NOW(),
+            DATE_ADD(NOW(), INTERVAL ? MINUTE),
+            IF(? > 0, DATE_SUB(DATE_ADD(NOW(), INTERVAL ? MINUTE), INTERVAL ? MINUTE), NULL),
+            ?
+        )
     ");
     $stmt->execute([
         $user_id,
         $timer_type_id,
         $title,
-        $startedAt,
-        $expectedExpiration,
-        $warningAt,
+        $durationMinutes,
+        $warningMinutes,
+        $durationMinutes,
+        $warningMinutes,
         $notes !== "" ? $notes : null
     ]);
+
+    $timerId = (int)$conn->lastInsertId();
+
+    $rowStmt = $conn->prepare("
+        SELECT started_at, expected_expiration_at, warning_at
+        FROM safety_timers WHERE id = ?
+    ");
+    $rowStmt->execute([$timerId]);
+    $row = $rowStmt->fetch(PDO::FETCH_ASSOC);
 
     echo json_encode([
         "success" => true,
         "message" => "Safety timer started",
-        "timer_id" => (int)$conn->lastInsertId(),
-        "started_at" => $startedAt,
-        "warning_at" => $warningAt,
-        "expected_expiration_at" => $expectedExpiration,
+        "timer_id" => $timerId,
+        "started_at" => $row['started_at'],
+        "warning_at" => $row['warning_at'],
+        "expected_expiration_at" => $row['expected_expiration_at'],
         "status" => "running"
     ]);
 } catch (Throwable $e) {
