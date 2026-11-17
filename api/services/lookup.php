@@ -6,86 +6,65 @@
  */
 
 /**
- * Resolve a name to an id in a lookup table. Optionally falls back to a
- * default row when the provided name is missing or unknown.
+ * Validate a value against a fixed set of allowed values (ENUM replacement for
+ * dropped lookup tables). Returns the value if valid, or the fallback if the
+ * input is missing/invalid, or null if no fallback is given.
  */
-function lookupId(PDO $conn, string $table, string $valueColumn, ?string $name, ?string $fallbackValue = null) {
-    $search = trim((string)$name);
-
-    if ($search !== '') {
-        $stmt = $conn->prepare("SELECT id FROM $table WHERE $valueColumn = ? LIMIT 1");
-        $stmt->execute([$search]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            return (int)$row['id'];
-        }
+function validateEnum(?string $value, array $allowed, ?string $fallback = null): ?string {
+    $search = trim((string)$value);
+    if ($search !== '' && in_array($search, $allowed, true)) {
+        return $search;
     }
-
-    if ($fallbackValue !== null) {
-        $stmt = $conn->prepare("SELECT id FROM $table WHERE $valueColumn = ? LIMIT 1");
-        $stmt->execute([$fallbackValue]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            return (int)$row['id'];
-        }
-    }
-
-    return null;
+    return $fallback !== null ? $fallback : null;
 }
 
-function getCategoryId(PDO $conn, ?string $name) {
-    return lookupId($conn, 'outage_categories', 'category_name', $name, 'power_outage');
+const SEVERITY_VALUES   = ['low', 'moderate', 'high', 'critical'];
+const STATUS_VALUES     = ['active', 'under_review', 'verified', 'resolved', 'rejected'];
+const CATEGORY_VALUES   = ['power_outage', 'low_voltage', 'power_fluctuation', 'transformer_explosion', 'fallen_power_line', 'electrical_fire', 'scheduled_maintenance', 'unknown_issue'];
+const HAZARD_TYPE_VALUES = ['none', 'smoke', 'sparks', 'fire', 'fallen_wire', 'explosion_sound', 'submerged_electrical_equipment', 'low_hanging_cable', 'exposed_wire', 'electrical_shock_risk'];
+const STATION_TYPE_VALUES = ['power_station', 'solar_station', 'charging_station', 'generator_station'];
+const NOTIFICATION_TYPE_VALUES = ['maintenance', 'outage', 'emergency', 'flood', 'electrical_hazard', 'battery', 'safety_timer', 'system'];
+const TIMER_TYPE_VALUES = ['sealed_refrigerator', 'deep_freezer_24h', 'deep_freezer_48h', 'medication'];
+
+// Default durations (hours) and warning hours per timer_type, matching the
+// retired safety_timer_types table. Copy into PHP backend constants.
+const TIMER_DEFAULTS = [
+    'sealed_refrigerator'  => ['duration' => 4.0,  'warning' => 1.0],
+    'deep_freezer_24h'     => ['duration' => 24.0, 'warning' => 4.0],
+    'deep_freezer_48h'     => ['duration' => 48.0, 'warning' => 6.0],
+    'medication'           => ['duration' => 4.0,  'warning' => 1.0],
+];
+
+function getCategory(?string $name): ?string {
+    return validateEnum($name, CATEGORY_VALUES, 'power_outage');
 }
 
-function getSeverityId(PDO $conn, ?string $name) {
-    return lookupId($conn, 'severity_levels', 'severity_name', $name, 'moderate');
+function getSeverity(PDO $conn, ?string $name): ?string {
+    return validateEnum($name, SEVERITY_VALUES, 'moderate');
 }
 
-function getHazardTypeId(PDO $conn, ?string $name) {
-    return lookupId($conn, 'hazard_types', 'hazard_name', $name, 'none');
+function getHazardType(?string $name): ?string {
+    return validateEnum($name, HAZARD_TYPE_VALUES, 'none');
 }
 
-function getStatusId(PDO $conn, ?string $name) {
-    return lookupId($conn, 'outage_statuses', 'status_name', $name, 'active');
+function getStatus(PDO $conn, ?string $name): ?string {
+    return validateEnum($name, STATUS_VALUES, 'active');
 }
 
-function getStatusNameById(PDO $conn, $statusId) {
-    $stmt = $conn->prepare("SELECT status_name FROM outage_statuses WHERE id = ? LIMIT 1");
-    $stmt->execute([(int)$statusId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['status_name'] : null;
+function getStationType(?string $name): ?string {
+    return validateEnum($name, STATION_TYPE_VALUES, 'power_station');
 }
 
-function getCategoryNameById(PDO $conn, $categoryId) {
-    $stmt = $conn->prepare("SELECT category_name FROM outage_categories WHERE id = ? LIMIT 1");
-    $stmt->execute([(int)$categoryId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['category_name'] : null;
+function getNotificationType(?string $name): ?string {
+    return validateEnum($name, NOTIFICATION_TYPE_VALUES, 'system');
 }
 
-function getSeverityNameById(PDO $conn, $severityId) {
-    $stmt = $conn->prepare("SELECT severity_name FROM severity_levels WHERE id = ? LIMIT 1");
-    $stmt->execute([(int)$severityId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['severity_name'] : null;
+function getTimerType(?string $name): ?string {
+    return validateEnum($name, TIMER_TYPE_VALUES, 'medication');
 }
 
-function getHazardNameById(PDO $conn, $hazardId) {
-    $stmt = $conn->prepare("SELECT hazard_name FROM hazard_types WHERE id = ? LIMIT 1");
-    $stmt->execute([(int)$hazardId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['hazard_name'] : null;
-}
-
-function getStationTypeId(PDO $conn, ?string $name) {
-    return lookupId($conn, 'power_station_types', 'type_name', $name, 'power_station');
-}
-
-function getStationTypeNameById(PDO $conn, $typeId) {
-    $stmt = $conn->prepare("SELECT type_name FROM power_station_types WHERE id = ? LIMIT 1");
-    $stmt->execute([(int)$typeId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['type_name'] : null;
+function getTimerDefaults(?string $timerType): ?array {
+    return TIMER_DEFAULTS[$timerType] ?? null;
 }
 
 /**

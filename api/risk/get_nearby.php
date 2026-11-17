@@ -30,7 +30,7 @@ try {
             fr.location_name,
             fr.latitude,
             fr.longitude,
-            fr.flood_level AS risk_level,
+            fr.severity AS risk_level,
             fr.description,
             fr.reported_at,
             b.barangay_name,

@@ -43,12 +43,10 @@ if ($id === false) {
 $linemanIdRaw  = array_key_exists("lineman_id", $data) ? $data["lineman_id"] : null;
 $barangayIdRaw = array_key_exists("barangay_id", $data) ? $data["barangay_id"] : null;
 $statusRaw     = array_key_exists("status", $data) ? $data["status"] : null;
-$workTypeRaw   = array_key_exists("work_type", $data) ? $data["work_type"] : null;
 
 $linemanId  = null;
 $barangayId = null;
 $status     = null;
-$workType   = null;
 
 if ($linemanIdRaw !== null) {
     $linemanId = filter_var($linemanIdRaw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -77,20 +75,11 @@ if ($statusRaw !== null && $statusRaw !== '') {
     }
 }
 
-if ($workTypeRaw !== null && $workTypeRaw !== '') {
-    $workType = strtolower(trim((string)$workTypeRaw));
-    if (!in_array($workType, LINEMAN_ASSIGNMENT_WORK_TYPES, true)) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "work_type must be outage, maintenance or both"]);
-        exit;
-    }
-}
-
 /* =========================================
    LOAD CURRENT VALUES
    ========================================= */
 $currentStmt = $conn->prepare("
-    SELECT la.id, la.lineman_id, la.barangay_id, la.status, la.work_type
+    SELECT la.id, la.lineman_id, la.barangay_id, la.status
     FROM lineman_assignments la
     WHERE la.id = ?
     LIMIT 1
@@ -107,19 +96,17 @@ if (!$current) {
 $targetLinemanId  = $linemanId ?? (int)$current['lineman_id'];
 $targetBarangayId = $barangayId ?? (int)$current['barangay_id'];
 $targetStatus     = $status ?? $current['status'];
-$targetWorkType   = $workType ?? $current['work_type'];
 
 /* =========================================
    VALIDATE EVERY CHANGED VALUE
    ========================================= */
 
-/* Same rule as create.php: the target's role is read from `roles`, never from a JWT or
+/* Same rule as create.php: the target's role is read from `users.role`, never from a JWT or
    the client's word. Validated even when lineman_id was omitted, because a lineman may
    have been demoted since the row was written. */
 $linemanStmt = $conn->prepare("
-    SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, r.role_name
+    SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role
     FROM users u
-    JOIN roles r ON r.id = u.role_id
     WHERE u.id = ?
     LIMIT 1
 ");
@@ -132,7 +119,7 @@ if (!$lineman) {
     exit;
 }
 
-if ($lineman['role_name'] !== 'lineman') {
+if ($lineman['role'] !== 'lineman') {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -180,9 +167,9 @@ try {
 
     $conn->prepare("
         UPDATE lineman_assignments
-        SET lineman_id = ?, barangay_id = ?, status = ?, assigned_by = ?, work_type = ?
+        SET lineman_id = ?, barangay_id = ?, status = ?, assigned_by = ?
         WHERE id = ?
-    ")->execute([$targetLinemanId, $targetBarangayId, $targetStatus, $assignedBy, $targetWorkType, $id]);
+    ")->execute([$targetLinemanId, $targetBarangayId, $targetStatus, $assignedBy, $id]);
 } catch (PDOException $e) {
     if ($e->getCode() === '23000') {
         http_response_code(409);
@@ -230,7 +217,6 @@ echo json_encode([
         "assigned_by_name" => trim($saved['ab_first'] . ' ' . ($saved['ab_middle'] ? $saved['ab_middle'] . ' ' : '') . $saved['ab_last']),
         "assigned_at"      => $saved['created_at'],
         "updated_at"       => $saved['updated_at'],
-        "status"           => $targetStatus,
-        "work_type"        => $targetWorkType
+        "status"           => $targetStatus
     ]
 ]);

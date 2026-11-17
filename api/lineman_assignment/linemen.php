@@ -33,8 +33,7 @@ try {
             u.last_name,
             u.email
         FROM users u
-        JOIN roles r ON r.id = u.role_id
-        WHERE r.role_name = 'lineman'
+        WHERE u.role = 'lineman'
         ORDER BY u.last_name ASC, u.first_name ASC, u.id ASC
     ");
     $stmt->execute();

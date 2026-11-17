@@ -36,12 +36,11 @@ if (!$status) {
 }
 
 try {
-    $statusId = getStatusId($conn, $status);
-    $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
-    $params = [":status_id" => $statusId];
+    $sql = "UPDATE outage_reports SET status = :status, updated_at = NOW()";
+    $params = [":status" => $status];
 
     if ($status === "resolved") {
-        $sql .= ", resolved_at = NOW(), is_active = 0";
+        $sql .= ", resolved_at = NOW()";
     }
 
     $stmt = $conn->prepare($sql);

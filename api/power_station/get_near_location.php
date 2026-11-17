@@ -30,8 +30,8 @@ try {
 
     $stmt = $conn->prepare("
         SELECT latitude, longitude
-        FROM user_locations
-        WHERE user_id = :id AND is_primary = 1
+        FROM users
+        WHERE id = :id
         LIMIT 1
     ");
 
@@ -84,13 +84,14 @@ try {
                 ps.location_name,
                 ps.latitude,
                 ps.longitude,
-                pst.type_name AS station_type,
+                ps.station_type,
                 ps.access_type,
                 ps.availability_status,
-                ps.operating_hours,
+                ps.opening_time,
+                ps.closing_time,
+                ps.is_24_hours,
                 ps.charging_type,
                 ps.description,
-                ps.image,
                 ps.created_at,
                 ps.updated_at,
                 b.barangay_name,
@@ -108,7 +109,6 @@ try {
                 ) AS distance
 
             FROM power_stations ps
-            LEFT JOIN power_station_types pst ON pst.id = ps.station_type_id
             LEFT JOIN barangays b ON b.id = ps.barangay_id
             WHERE ps.availability_status = 'available'
         ";
@@ -144,19 +144,19 @@ try {
                 ps.location_name,
                 ps.latitude,
                 ps.longitude,
-                pst.type_name AS station_type,
+                ps.station_type,
                 ps.access_type,
                 ps.availability_status,
-                ps.operating_hours,
+                ps.opening_time,
+                ps.closing_time,
+                ps.is_24_hours,
                 ps.charging_type,
                 ps.description,
-                ps.image,
                 ps.created_at,
                 ps.updated_at,
                 b.barangay_name,
                 0 AS distance
             FROM power_stations ps
-            LEFT JOIN power_station_types pst ON pst.id = ps.station_type_id
             LEFT JOIN barangays b ON b.id = ps.barangay_id
             WHERE ps.availability_status = 'available'
             ORDER BY ps.created_at DESC

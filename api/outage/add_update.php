@@ -33,36 +33,39 @@ if ($outageReportId <= 0 || $updateMessage === "") {
 
 try {
     /* Existence + assignment check first: a denied field update must not reach
-   outage_report_updates, nor be able to advance the report's status. */
+       the report, nor be able to advance the report's status. */
     require_outage_access($conn, $user, $outageReportId);
 
-    $status_id = null;
+    /* Store the latest update message on the report itself. */
+    $status = null;
     if ($statusName !== "") {
-        $status_id = getStatusId($conn, $statusName);
-        if (!$status_id) {
+        $status = getStatus($conn, $statusName);
+        if (!$status) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "Invalid status"]);
             exit;
         }
     }
 
-    /* Preserve history in outage_report_updates */
-    $conn->prepare("
-        INSERT INTO outage_report_updates (outage_report_id, updated_by, status_id, update_message)
-        VALUES (?, ?, ?, ?)
-    ")->execute([$outageReportId, $user['id'], $status_id, $updateMessage]);
+    if ($status !== null) {
+        $sql = "UPDATE outage_reports SET status = :status, update_message = :update_message, updated_at = NOW()";
+        $params = [":status" => $status, ":update_message" => $updateMessage, ":id" => $outageReportId];
 
-    /* Optionally advance the active status */
-    if ($status_id) {
-        $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
-        $params = [":status_id" => $status_id, ":id" => $outageReportId];
-
-        if ($statusName === 'resolved') {
-            $sql .= ", resolved_at = NOW(), is_active = 0";
+        if ($status === 'resolved') {
+            $sql .= ", resolved_at = NOW()";
         }
 
         $sql .= " WHERE id = :id";
         $conn->prepare($sql)->execute($params);
+    } else {
+        $conn->prepare("
+            UPDATE outage_reports
+            SET update_message = :update_message, updated_at = NOW()
+            WHERE id = :id
+        ")->execute([
+            ":update_message" => $updateMessage,
+            ":id" => $outageReportId,
+        ]);
     }
 
     echo json_encode([

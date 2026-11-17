@@ -63,18 +63,25 @@ try {
         $targetStatus = $explicitStatus;
     }
 
-    $targetStatusId = getStatusId($conn, $targetStatus);
-    if (!$targetStatusId) {
+    $targetStatus = $verificationStatus === 'confirmed'
+        ? 'verified'
+        : ($verificationStatus === 'false_report' ? 'rejected' : 'under_review');
+
+    if ($explicitStatus !== "") {
+        $targetStatus = $explicitStatus;
+    }
+
+    if (!in_array($targetStatus, ['active', 'under_review', 'verified', 'resolved', 'rejected'], true)) {
         http_response_code(400);
         echo json_encode(["success" => false, "message" => "Invalid target status"]);
         exit;
     }
 
-    $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
-    $params = [":status_id" => $targetStatusId, ":id" => $outageReportId];
+    $sql = "UPDATE outage_reports SET status = :status, updated_at = NOW()";
+    $params = [":status" => $targetStatus, ":id" => $outageReportId];
 
     if ($targetStatus === 'resolved') {
-        $sql .= ", resolved_at = NOW(), is_active = 0";
+        $sql .= ", resolved_at = NOW()";
     }
     $sql .= " WHERE id = :id";
 

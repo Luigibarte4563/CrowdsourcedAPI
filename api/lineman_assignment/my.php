@@ -23,7 +23,7 @@ $user = requireRole(requireAuthUser(), ['lineman']);
 
 try {
     $stmt = $conn->prepare("
-        SELECT la.id, la.barangay_id, b.barangay_name, la.status, la.work_type
+        SELECT la.id, la.barangay_id, b.barangay_name, la.status
         FROM lineman_assignments la
         JOIN barangays b ON b.id = la.barangay_id
         WHERE la.lineman_id = ?
@@ -38,8 +38,7 @@ try {
             "id"            => (int)$row['id'],
             "barangay_id"   => (int)$row['barangay_id'],
             "barangay_name" => $row['barangay_name'],
-            "status"        => $row['status'],
-            "work_type"     => $row['work_type']
+            "status"        => $row['status']
         ];
     }
 

@@ -25,7 +25,6 @@ if (!$barangay || !$status) {
 }
 
 try {
-    $statusId = getStatusId($conn, $status);
 
     /*
      * This endpoint bulk-updates by barangay NAME and its WHERE clause has no other
@@ -51,11 +50,11 @@ try {
         $barangayId = findBarangayId($conn, $barangay);
     }
 
-    $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
-    $params = [":status_id" => $statusId, ":barangay_id" => $barangayId];
+    $sql = "UPDATE outage_reports SET status = :status, updated_at = NOW()";
+    $params = [":status" => $status, ":barangay_id" => $barangayId];
 
     if ($status === "resolved") {
-        $sql .= ", resolved_at = NOW(), is_active = 0";
+        $sql .= ", resolved_at = NOW()";
     }
 
     $sql .= " WHERE barangay_id = :barangay_id";

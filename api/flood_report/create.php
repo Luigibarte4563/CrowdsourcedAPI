@@ -19,14 +19,14 @@ if (!is_array($data)) {
 
 $location_name  = trim($data["location_name"] ?? "");
 $description    = trim($data["description"] ?? "");
-$flood_level    = $data["flood_level"] ?? "low";
+$severity      = $data["severity"] ?? "low";
 $flood_depth_cm = isset($data["flood_depth_cm"]) ? (float)$data["flood_depth_cm"] : null;
 $image_proof    = $data["image_url"] ?? $data["image_proof"] ?? null;
 
-$validLevels = ['low', 'moderate', 'high', 'severe'];
-if (!in_array($flood_level, $validLevels, true)) {
+$validLevels = ['low', 'moderate', 'high', 'critical'];
+if (!in_array($severity, $validLevels, true)) {
     http_response_code(400);
-    echo json_encode(["success" => false, "message" => "Invalid flood_level"]);
+    echo json_encode(["success" => false, "message" => "Invalid severity"]);
     exit;
 }
 
@@ -99,7 +99,7 @@ try {
     $stmt = $conn->prepare("
         INSERT INTO flood_reports (
             reported_by, barangay_id, location_name, latitude, longitude,
-            flood_depth_cm, flood_level, description, image_proof
+            flood_depth_cm, severity, description, image_proof
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
     $stmt->execute([
@@ -109,7 +109,7 @@ try {
         $latitude,
         $longitude,
         $flood_depth_cm,
-        $flood_level,
+        $severity,
         $description !== "" ? $description : null,
         $image_proof
     ]);

@@ -39,12 +39,11 @@ try {
     }
 
     /* ============ LINEMAN: STATUS-ONLY PROGRESS UPDATES ============
-       A lineman whose assignment covers one of this schedule's barangays (work_type
-       'maintenance' or 'both') may move the schedule's STATUS - e.g. to 'ongoing' or
+       A lineman whose assignment covers one of this schedule's barangays may move the schedule's STATUS - e.g. to 'ongoing' or
        'completed' - but may not re-plan it. Enforced here because rbac.php cannot
        express "owns one field of one covered row":
          1. the body may carry nothing but maintenance_id + status;
-         2. an active assignment with the right work type must cover the schedule.
+         2. an active assignment must cover the schedule.
        Only the status column is written - date, times, description, radius and the
        location list are left exactly as the company set them. No resident
        notifications are re-sent: the notice copy is built around the editor's
@@ -74,7 +73,6 @@ try {
             WHERE ml.maintenance_id = ?
               AND la.lineman_id = ?
               AND la.status = 'active'
-              AND la.work_type IN ('maintenance', 'both')
             LIMIT 1
         ");
         $coverStmt->execute([$maintenance_id, (int)$user['id']]);
@@ -257,12 +255,10 @@ try {
 
     if (!empty($barangayCoords)) {
         $userStmt = $conn->prepare("
-            SELECT u.id, ul.latitude, ul.longitude, b.barangay_name AS user_barangay
+            SELECT u.id, u.latitude, u.longitude, b.barangay_name AS user_barangay
             FROM users u
-            JOIN roles r ON r.id = u.role_id
-            LEFT JOIN user_locations ul ON ul.user_id = u.id AND ul.is_primary = 1
-            LEFT JOIN barangays b ON b.id = ul.barangay_id
-            WHERE r.role_name = 'user'
+            LEFT JOIN barangays b ON b.id = u.barangay_id
+            WHERE u.role = 'user'
         ");
         $userStmt->execute();
         $allUsers = $userStmt->fetchAll(PDO::FETCH_ASSOC);

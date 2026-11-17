@@ -138,9 +138,9 @@ try {
             ")->execute([$googleId, $picture !== '' ? $picture : null, $userId]);
         } else {
             // 3) Brand new user -> default role.
-            $roleId = getRoleIdByName('user');
+            $role = 'user';
 
-            if (!$roleId) {
+            if (!$role) {
                 failToFrontend('google_role_missing');
             }
 
@@ -153,7 +153,7 @@ try {
                     password,
                     picture,
                     auth_provider,
-                    role_id,
+                    role,
                     last_login
                 ) VALUES (?, ?, ?, ?, NULL, ?, 'google', ?, NOW())
             ")->execute([
@@ -162,7 +162,7 @@ try {
                 $lastName,
                 $email,
                 $picture !== '' ? $picture : null,
-                $roleId
+                $role
             ]);
 
             $userId = (int)$conn->lastInsertId();

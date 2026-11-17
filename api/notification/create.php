@@ -32,27 +32,19 @@ try {
 
     $stmt = $conn->prepare("
         INSERT INTO notifications
-            (user_id, notification_type_id, title, message)
-        VALUES (:user_id, :type_id, :title, :message)
+            (user_id, notification_type, title, message)
+        VALUES (:user_id, :type, :title, :message)
     ");
-
-    $typeStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = ? LIMIT 1");
-    $systemStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = 'system' LIMIT 1");
-    $systemStmt->execute();
-    $systemRow = $systemStmt->fetch(PDO::FETCH_ASSOC);
-    $systemId = $systemRow ? (int)$systemRow['id'] : null;
 
     $count = 0;
 
-    $insertOne = function ($userId, $title, $message, $type) use ($conn, $stmt, $typeStmt, $systemId, &$count) {
-        $typeStmt->execute([$type]);
-        $row = $typeStmt->fetch(PDO::FETCH_ASSOC);
-        $typeId = $row ? (int)$row['id'] : $systemId;
-        if (!$typeId) return;
+    $insertOne = function ($userId, $title, $message, $type) use ($conn, $stmt, &$count) {
+        $type = getNotificationType($type);
+        if (!$type) return;
 
         $stmt->execute([
             ":user_id" => (int)$userId,
-            ":type_id" => $typeId,
+            ":type" => $type,
             ":title" => $title,
             ":message" => $message
         ]);

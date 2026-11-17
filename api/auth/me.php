@@ -44,7 +44,6 @@ echo json_encode([
         "picture"       => $record['picture'],
         "auth_provider" => $record['auth_provider'],
         "role"          => $record['role'],
-        "role_id"       => (int)$record['role_id'],
         "created_at"    => $record['created_at']
     ]
 ]);

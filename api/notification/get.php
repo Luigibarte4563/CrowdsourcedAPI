@@ -35,7 +35,7 @@ try {
             n.user_id,
             n.title,
             n.message,
-            nt.type_name AS type,
+            n.notification_type AS type,
             n.is_read,
             n.outage_report_id,
             n.maintenance_id,
@@ -44,7 +44,6 @@ try {
             n.safety_timer_id,
             n.created_at
         FROM notifications n
-        JOIN notification_types nt ON nt.id = n.notification_type_id
         WHERE n.user_id = :user_id
     ";
 
@@ -54,7 +53,7 @@ try {
         $sql .= " AND n.is_read = 0 ";
     }
     if (!empty($type)) {
-        $sql .= " AND nt.type_name = :type ";
+        $sql .= " AND n.notification_type = :type ";
         $params[":type"] = $type;
     }
     if (!empty($maintenance_id)) {

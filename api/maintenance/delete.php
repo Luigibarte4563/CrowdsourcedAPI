@@ -30,10 +30,9 @@ try {
         SELECT ms.id
         FROM maintenance_schedules ms
         JOIN users u ON u.id = ms.created_by
-        JOIN roles r ON r.id = u.role_id
         WHERE ms.id = :id
           AND u.id = :user_id
-          AND r.role_name IN ('electric_company', 'admin')
+          AND u.role IN ('electric_company', 'admin')
         LIMIT 1
     ");
     $stmt->execute([":id" => $maintenance_id, ":user_id" => $user['id']]);

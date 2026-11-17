@@ -33,7 +33,7 @@ $sql = "
         eh.status,
         eh.reported_at,
         b.barangay_name,
-        ht.hazard_name AS hazard_type,
+        eh.hazard_type,
         (
             6371000 * ACOS(
                 LEAST(1,
@@ -45,7 +45,6 @@ $sql = "
         ) AS distance
     FROM electrical_hazards eh
     LEFT JOIN barangays b ON b.id = eh.barangay_id
-    LEFT JOIN hazard_types ht ON ht.id = eh.hazard_type_id
     WHERE eh.status != 'resolved'
     HAVING distance <= :radius
     ORDER BY distance ASC

@@ -37,25 +37,21 @@ $severity = $_GET['severity'] ?? null;
 $sql = "
     SELECT COUNT(*) AS total_active_reports
     FROM outage_reports orp
-    JOIN outage_statuses st  ON st.id = orp.status_id
-    JOIN outage_categories oc ON oc.id = orp.category_id
-    JOIN severity_levels sv   ON sv.id = orp.severity_id
-    WHERE st.status_name != 'rejected'
-      AND orp.is_active = 1
+    WHERE orp.status != 'rejected'
 ";
 
 $params = [];
 
 if (!empty($status)) {
-    $sql .= " AND st.status_name = :status";
+    $sql .= " AND orp.status = :status";
     $params[':status'] = $status;
 }
 if (!empty($category)) {
-    $sql .= " AND oc.category_name = :category";
+    $sql .= " AND orp.category = :category";
     $params[':category'] = $category;
 }
 if (!empty($severity)) {
-    $sql .= " AND sv.severity_name = :severity";
+    $sql .= " AND orp.severity = :severity";
     $params[':severity'] = $severity;
 }
 

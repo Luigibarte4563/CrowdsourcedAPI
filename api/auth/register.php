@@ -81,14 +81,9 @@ try {
    outright rather than validated-and-honoured: this endpoint is unauthenticated, so
    accepting a role from it let anybody `POST {"role":"admin"}` and mint themselves a
    privileged account. `lineman`, `electric_company` and `admin` are granted only by a
-   system administrator writing `users.role_id` directly (see endpoints.md).
+   system administrator writing `users.role` directly (see endpoints.php).
    ========================================= */
-$roleId = getRoleIdByName('user');
-if (!$roleId) {
-    http_response_code(500);
-    echo json_encode(["success" => false, "message" => "Role configuration missing"]);
-    exit;
-}
+$role = 'user';
 
 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
@@ -101,7 +96,7 @@ try {
             email,
             password,
             auth_provider,
-            role_id
+            role
         ) VALUES (?, ?, ?, ?, ?, 'local', ?)
     ");
 
@@ -111,7 +106,7 @@ try {
         $last_name,
         $email,
         $hashedPassword,
-        $roleId
+        $role
     ]);
 
     $userId = (int)$conn->lastInsertId();

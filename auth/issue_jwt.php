@@ -13,13 +13,24 @@ use Firebase\JWT\JWT;
  *
  * Returns the token string on success, or null on failure.
  */
+/**
+ * Valid role values, matching the `users.role` ENUM.
+ */
+const VALID_ROLES = ['user', 'lineman', 'electric_company', 'admin'];
+
+/**
+ * Issues the application's own JWT (as an httpOnly cookie) for a user id.
+ * The token carries the user id and role name so existing authorization
+ * checks ($user['role'] === 'electric_company', etc.) keep working.
+ *
+ * Returns the token string on success, or null on failure.
+ */
 function issueJWT($userId) {
     $conn = getConnection();
 
     $stmt = $conn->prepare("
-        SELECT u.id, u.email, r.role_name AS role
+        SELECT u.id, u.email, u.role
         FROM users u
-        JOIN roles r ON r.id = u.role_id
         WHERE u.id = ?
         LIMIT 1
     ");
@@ -49,37 +60,21 @@ function issueJWT($userId) {
 }
 
 /**
- * Resolve a role id from a role name (lookup table driven).
+ * Validate a role name against the users.role ENUM. Returns the name if valid, null otherwise.
  */
-function getRoleIdByName($roleName) {
-    $conn = getConnection();
-    $stmt = $conn->prepare("SELECT id FROM roles WHERE role_name = ? LIMIT 1");
-    $stmt->execute([$roleName]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? (int)$row['id'] : null;
+function validateRole($roleName) {
+    return in_array($roleName, VALID_ROLES, true) ? $roleName : null;
 }
 
 /**
- * Resolve a role name from a role id.
- */
-function getRoleNameById($roleId) {
-    $conn = getConnection();
-    $stmt = $conn->prepare("SELECT role_name FROM roles WHERE id = ? LIMIT 1");
-    $stmt->execute([$roleId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ? $row['role_name'] : null;
-}
-
-/**
- * Loads the full user row (with role name joined) from the database by id.
- * Returns null if not found.
+ * Loads the full user row from the database by id.
+ * Returns null if not found. `role` is already a column on users (ENUM), no JOIN needed.
  */
 function getUserRecord($userId) {
     $conn = getConnection();
     $stmt = $conn->prepare("
-        SELECT u.*, r.role_name AS role
+        SELECT u.*
         FROM users u
-        JOIN roles r ON r.id = u.role_id
         WHERE u.id = ?
         LIMIT 1
     ");

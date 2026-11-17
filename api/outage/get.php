@@ -29,8 +29,6 @@ $sql = "
         orp.latitude,
         orp.longitude,
         orp.description,
-        orp.affected_houses,
-        orp.is_active,
         orp.started_at,
         orp.resolved_at,
         orp.resolution_note,
@@ -38,15 +36,11 @@ $sql = "
         orp.updated_at,
         b.id AS barangay_id,
         b.barangay_name,
-        oc.category_name AS category,
-        sv.severity_name AS severity,
-        hz.hazard_name AS hazard_type,
-        st.status_name AS status
+        orp.category AS category,
+        orp.severity AS severity,
+        orp.hazard_type AS hazard_type,
+        orp.status AS status
     FROM outage_reports orp
-    JOIN outage_categories oc ON oc.id = orp.category_id
-    JOIN severity_levels sv   ON sv.id = orp.severity_id
-    JOIN hazard_types hz     ON hz.id = orp.hazard_type_id
-    JOIN outage_statuses st  ON st.id = orp.status_id
     LEFT JOIN barangays b    ON b.id = orp.barangay_id
     WHERE 1=1
 ";
@@ -54,15 +48,15 @@ $sql = "
 $params = [];
 
 if (!empty($status)) {
-    $sql .= " AND st.status_name = :status";
+    $sql .= " AND orp.status = :status";
     $params[':status'] = $status;
 }
 if (!empty($category)) {
-    $sql .= " AND oc.category_name = :category";
+    $sql .= " AND orp.category = :category";
     $params[':category'] = $category;
 }
 if (!empty($severity)) {
-    $sql .= " AND sv.severity_name = :severity";
+    $sql .= " AND orp.severity = :severity";
     $params[':severity'] = $severity;
 }
 if (!empty($barangay)) {

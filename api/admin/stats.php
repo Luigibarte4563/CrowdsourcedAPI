@@ -69,25 +69,25 @@ try {
                 ),
                 "by_role" => groupCount(
                     $conn,
-                    "SELECT r.role_name AS label, COUNT(*) AS `count`
-                     FROM users u JOIN roles r ON r.id = u.role_id
-                     GROUP BY r.role_name ORDER BY `count` DESC"
+                    "SELECT u.role AS label, COUNT(*) AS `count`
+                     FROM users u
+                     GROUP BY u.role ORDER BY `count` DESC"
                 ),
             ],
             "outages" => [
                 "total"  => scalarCount($conn, "SELECT COUNT(*) FROM outage_reports"),
-                "active" => scalarCount($conn, "SELECT COUNT(*) FROM outage_reports WHERE is_active = 1"),
+                "active" => scalarCount($conn, "SELECT COUNT(*) FROM outage_reports WHERE status = 'active'"),
                 "by_status" => groupCount(
                     $conn,
-                    "SELECT s.status_name AS label, COUNT(*) AS `count`
-                     FROM outage_reports o JOIN outage_statuses s ON s.id = o.status_id
-                     GROUP BY s.status_name ORDER BY `count` DESC"
+                    "SELECT o.status AS label, COUNT(*) AS `count`
+                     FROM outage_reports o
+                     GROUP BY o.status ORDER BY `count` DESC"
                 ),
                 "by_severity" => groupCount(
                     $conn,
-                    "SELECT v.severity_name AS label, COUNT(*) AS `count`
-                     FROM outage_reports o JOIN severity_levels v ON v.id = o.severity_id
-                     GROUP BY v.severity_name ORDER BY `count` DESC"
+                    "SELECT o.severity AS label, COUNT(*) AS `count`
+                     FROM outage_reports o
+                     GROUP BY o.severity ORDER BY `count` DESC"
                 ),
             ],
             "floods" => [
@@ -95,8 +95,8 @@ try {
                 "unresolved" => scalarCount($conn, "SELECT COUNT(*) FROM flood_reports WHERE status <> 'cleared'"),
                 "by_level" => groupCount(
                     $conn,
-                    "SELECT flood_level AS label, COUNT(*) AS `count`
-                     FROM flood_reports GROUP BY flood_level ORDER BY `count` DESC"
+                    "SELECT severity AS label, COUNT(*) AS `count`
+                     FROM flood_reports GROUP BY severity ORDER BY `count` DESC"
                 ),
             ],
             "hazards" => [

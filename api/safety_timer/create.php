@@ -24,40 +24,27 @@ $durationHours = null;
 $warningHours  = null;
 
 try {
-    /* If a timer_type is provided, use its defaults */
-    if ($timer_type_name !== "") {
-        $typeStmt = $conn->prepare("
-            SELECT id, default_duration_hours, warning_hours_before
-            FROM safety_timer_types WHERE timer_name = ? LIMIT 1
-        ");
-        $typeStmt->execute([$timer_type_name]);
-        $timerType = $typeStmt->fetch(PDO::FETCH_ASSOC);
+    /* Timer type and its defaults from backend constants */
+    $timerType = getTimerType($timer_type_name);
+    $timerDefaults = $timerType ? getTimerDefaults($timerType) : null;
 
+    if ($timer_type_name !== "") {
         if (!$timerType) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "Unknown timer_type_name"]);
             exit;
         }
-
-        $timer_type_id = (int)$timerType['id'];
-        $durationHours = (float)$timerType['default_duration_hours'];
-        $warningHours  = (float)$timerType['warning_hours_before'];
+        $durationHours = $timerDefaults['duration'];
+        $warningHours  = $timerDefaults['warning'];
     } else {
         $durationHours = isset($data["duration_hours"]) ? (float)$data["duration_hours"] : null;
         $warningHours  = isset($data["warning_hours_before"]) ? (float)$data["warning_hours_before"] : 0;
-        $timer_type_id = null;
 
         if ($durationHours === null || $durationHours <= 0) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "timer_type_name or duration_hours is required"]);
             exit;
         }
-
-        /* generic default type if none matched */
-        $defStmt = $conn->prepare("SELECT id FROM safety_timer_types WHERE timer_name = 'medication' LIMIT 1");
-        $defStmt->execute();
-        $defRow = $defStmt->fetch(PDO::FETCH_ASSOC);
-        $timer_type_id = $defRow ? (int)$defRow['id'] : null;
     }
 
     if ($title === "") {
@@ -76,7 +63,7 @@ try {
     $stmt = $conn->prepare("
         INSERT INTO safety_timers (
             user_id,
-            timer_type_id,
+            timer_type,
             title,
             started_at,
             expected_expiration_at,
@@ -92,7 +79,7 @@ try {
     ");
     $stmt->execute([
         $user_id,
-        $timer_type_id,
+        $timerType,
         $title,
         $durationMinutes,
         $warningMinutes,

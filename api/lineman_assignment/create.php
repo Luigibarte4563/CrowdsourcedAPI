@@ -54,9 +54,8 @@ if ($barangayId === false) {
    rule can live - it must never be skipped. A plain `user`, `electric_company` or
    `admin` id is rejected even though the id itself is valid. */
 $linemanStmt = $conn->prepare("
-    SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, r.role_name
+    SELECT u.id, u.first_name, u.middle_name, u.last_name, u.email, u.role
     FROM users u
-    JOIN roles r ON r.id = u.role_id
     WHERE u.id = ?
     LIMIT 1
 ");
@@ -69,7 +68,7 @@ if (!$lineman) {
     exit;
 }
 
-if ($lineman['role_name'] !== 'lineman') {
+if ($lineman['role'] !== 'lineman') {
     http_response_code(400);
     echo json_encode([
         "success" => false,
@@ -86,18 +85,6 @@ if (!$barangay) {
     http_response_code(400);
     echo json_encode(["success" => false, "message" => "The selected barangay does not exist"]);
     exit;
-}
-
-/* What the assignment is for. Optional; defaults to 'both', which is what every row
-   written before this column existed effectively meant. */
-$workType = 'both';
-if (isset($data["work_type"]) && $data["work_type"] !== '') {
-    $workType = strtolower(trim((string)$data["work_type"]));
-    if (!in_array($workType, LINEMAN_ASSIGNMENT_WORK_TYPES, true)) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "work_type must be outage, maintenance or both"]);
-        exit;
-    }
 }
 
 /* =========================================
@@ -138,16 +125,16 @@ try {
         $assignmentId = (int)$existing['id'];
         $conn->prepare("
             UPDATE lineman_assignments
-            SET status = 'active', assigned_by = ?, work_type = ?
+            SET status = 'active', assigned_by = ?
             WHERE id = ?
-        ")->execute([$assignedBy, $workType, $assignmentId]);
+        ")->execute([$assignedBy, $assignmentId]);
 
         $reactivated = true;
     } else {
         $conn->prepare("
-            INSERT INTO lineman_assignments (lineman_id, barangay_id, assigned_by, status, work_type)
-            VALUES (?, ?, ?, 'active', ?)
-        ")->execute([$linemanId, $barangayId, $assignedBy, $workType]);
+            INSERT INTO lineman_assignments (lineman_id, barangay_id, assigned_by, status)
+            VALUES (?, ?, ?, 'active')
+        ")->execute([$linemanId, $barangayId, $assignedBy]);
 
         $assignmentId = (int)$conn->lastInsertId();
         $reactivated = false;
@@ -186,7 +173,7 @@ try {
    RESPONSE
    ========================================= */
 $readStmt = $conn->prepare("
-    SELECT la.id, la.created_at, la.updated_at, la.status, la.work_type,
+    SELECT la.id, la.created_at, la.updated_at, la.status,
            au.first_name AS ab_first, au.middle_name AS ab_middle, au.last_name AS ab_last
     FROM lineman_assignments la
     JOIN users au ON au.id = la.assigned_by
@@ -211,7 +198,6 @@ echo json_encode([
         "assigned_by_name" => trim($saved['ab_first'] . ' ' . ($saved['ab_middle'] ? $saved['ab_middle'] . ' ' : '') . $saved['ab_last']),
         "assigned_at"      => $saved['created_at'],
         "updated_at"       => $saved['updated_at'],
-        "status"           => $saved['status'],
-        "work_type"        => $saved['work_type']
+        "status"           => $saved['status']
     ]
 ]);

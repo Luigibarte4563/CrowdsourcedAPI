@@ -42,8 +42,7 @@ try {
     $stmt = $conn->prepare("
         SELECT COUNT(*) AS total_resolved
         FROM outage_reports orp
-        JOIN outage_statuses st ON st.id = orp.status_id
-        WHERE LOWER(TRIM(st.status_name)) = 'resolved'
+        WHERE LOWER(TRIM(orp.status)) = 'resolved'
         {$scope}
     ");
     $stmt->execute($scopeParams);

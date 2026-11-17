@@ -14,21 +14,23 @@ USE powerguide;
 
 
 -- =========================================================
--- 1. ROLES
+-- 1. BARANGAYS
 -- =========================================================
 
-CREATE TABLE roles (
+CREATE TABLE barangays (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    role_name VARCHAR(50) NOT NULL UNIQUE,
-    description VARCHAR(255) NULL,
+
+    barangay_name VARCHAR(150) NOT NULL UNIQUE,
+
+    city VARCHAR(150) NOT NULL DEFAULT 'Dagupan City',
+
+    province VARCHAR(150) NOT NULL DEFAULT 'Pangasinan',
+
+    latitude DECIMAL(10,8) NULL,
+    longitude DECIMAL(11,8) NULL,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
-INSERT INTO roles (role_name, description) VALUES
-('user', 'Regular PowerGuide user'),
-('lineman', 'DECORP field personnel'),
-('electric_company', 'DECORP/electric company personnel'),
-('admin', 'System administrator');
 
 
 -- =========================================================
@@ -54,8 +56,16 @@ CREATE TABLE users (
         'google'
     ) NOT NULL DEFAULT 'local',
 
-    role_id INT NOT NULL,
+    role ENUM('user','lineman','electric_company','admin') NOT NULL DEFAULT 'user',
 
+    barangay_id INT NULL,
+
+    address VARCHAR(255) NULL,
+    latitude DECIMAL(10,8) NULL,
+    longitude DECIMAL(11,8) NULL,
+    location_updated_at TIMESTAMP NULL,
+
+    /* refresh_token must store a HASH of the token, never plain text. */
     refresh_token TEXT NULL,
     last_login TIMESTAMP NULL,
 
@@ -64,170 +74,20 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (role_id)
-        REFERENCES roles(id)
-        ON DELETE RESTRICT
-);
-
-CREATE INDEX idx_users_role
-ON users(role_id);
-
-
--- =========================================================
--- 3. BARANGAYS
--- =========================================================
-
-CREATE TABLE barangays (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    barangay_name VARCHAR(150) NOT NULL UNIQUE,
-
-    city VARCHAR(150) NOT NULL DEFAULT 'Dagupan City',
-
-    province VARCHAR(150) NOT NULL DEFAULT 'Pangasinan',
-
-    latitude DECIMAL(10,8) NULL,
-    longitude DECIMAL(11,8) NULL,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-
--- =========================================================
--- 4. USER LOCATIONS
--- =========================================================
-
-CREATE TABLE user_locations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    user_id INT NOT NULL,
-
-    barangay_id INT NULL,
-
-    address VARCHAR(255) NULL,
-
-    latitude DECIMAL(10,8) NULL,
-    longitude DECIMAL(11,8) NULL,
-
-    is_primary BOOLEAN DEFAULT TRUE,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP()
-        ON UPDATE CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-
     FOREIGN KEY (barangay_id)
         REFERENCES barangays(id)
         ON DELETE SET NULL
 );
 
-CREATE INDEX idx_user_locations_coordinates
-ON user_locations(latitude, longitude);
+CREATE INDEX idx_users_role
+ON users(role);
 
-CREATE INDEX idx_user_locations_barangay
-ON user_locations(barangay_id);
-
-
--- =========================================================
--- 5. OUTAGE CATEGORIES
--- =========================================================
-
-CREATE TABLE outage_categories (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    category_name VARCHAR(100) NOT NULL UNIQUE,
-
-    description VARCHAR(255) NULL
-);
-
-INSERT INTO outage_categories
-(category_name, description)
-VALUES
-('power_outage', 'Complete loss of electricity'),
-('low_voltage', 'Low voltage condition'),
-('power_fluctuation', 'Unstable electrical supply'),
-('transformer_explosion', 'Transformer explosion'),
-('fallen_power_line', 'Fallen power line'),
-('electrical_fire', 'Electrical fire'),
-('scheduled_maintenance', 'Scheduled electrical maintenance'),
-('unknown_issue', 'Unknown electrical issue');
+CREATE INDEX idx_users_coordinates
+ON users(latitude, longitude);
 
 
 -- =========================================================
--- 6. SEVERITY LEVELS
--- =========================================================
-
-CREATE TABLE severity_levels (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    severity_name VARCHAR(50) NOT NULL UNIQUE,
-
-    priority INT NOT NULL
-);
-
-INSERT INTO severity_levels
-(severity_name, priority)
-VALUES
-('minor', 1),
-('moderate', 2),
-('critical', 3);
-
-
--- =========================================================
--- 7. HAZARD TYPES
--- =========================================================
-
-CREATE TABLE hazard_types (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    hazard_name VARCHAR(100) NOT NULL UNIQUE,
-
-    description VARCHAR(255) NULL
-);
-
-INSERT INTO hazard_types
-(hazard_name, description)
-VALUES
-('none', 'No additional hazard'),
-('smoke', 'Smoke detected'),
-('sparks', 'Electrical sparks'),
-('fire', 'Electrical fire'),
-('fallen_wire', 'Fallen electrical wire'),
-('explosion_sound', 'Explosion sound'),
-('submerged_electrical_equipment', 'Electrical equipment submerged in flood water'),
-('low_hanging_cable', 'Low-hanging electrical cable'),
-('exposed_wire', 'Exposed electrical wire'),
-('electrical_shock_risk', 'Potential electrocution risk');
-
-
--- =========================================================
--- 8. OUTAGE STATUSES
--- =========================================================
-
-CREATE TABLE outage_statuses (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    status_name VARCHAR(50) NOT NULL UNIQUE,
-
-    description VARCHAR(255) NULL
-);
-
-INSERT INTO outage_statuses
-(status_name, description)
-VALUES
-('active', 'Currently active report'),
-('under_review', 'Being reviewed'),
-('verified', 'Verified by authorized personnel'),
-('resolved', 'Issue has been resolved'),
-('rejected', 'Report was rejected');
-
-
--- =========================================================
--- 9. OUTAGE REPORTS
+-- 3. OUTAGE REPORTS
 -- =========================================================
 
 CREATE TABLE outage_reports (
@@ -237,13 +97,17 @@ CREATE TABLE outage_reports (
 
     barangay_id INT NULL,
 
-    category_id INT NOT NULL,
+    category ENUM('power_outage','low_voltage','power_fluctuation',
+        'transformer_explosion','fallen_power_line','electrical_fire',
+        'scheduled_maintenance','unknown_issue') NOT NULL,
 
-    severity_id INT NOT NULL,
+    severity ENUM('low','moderate','high','critical') NOT NULL DEFAULT 'low',
 
-    hazard_type_id INT NOT NULL,
+    hazard_type ENUM('none','smoke','sparks','fire','fallen_wire',
+        'explosion_sound','submerged_electrical_equipment','low_hanging_cable',
+        'exposed_wire','electrical_shock_risk') NOT NULL DEFAULT 'none',
 
-    status_id INT NOT NULL,
+    status ENUM('active','under_review','verified','resolved','rejected') NOT NULL DEFAULT 'active',
 
     report_key VARCHAR(255) NOT NULL UNIQUE,
 
@@ -254,17 +118,15 @@ CREATE TABLE outage_reports (
 
     description TEXT NULL,
 
-    affected_houses INT DEFAULT 1,
-
-    is_active BOOLEAN DEFAULT TRUE,
-
     started_at DATETIME NULL,
 
     resolved_at DATETIME NULL,
 
     resolution_note TEXT NULL,
 
-    maintenance_id INT NULL,
+    updated_by INT NULL,
+
+    update_message TEXT NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -279,21 +141,9 @@ CREATE TABLE outage_reports (
         REFERENCES barangays(id)
         ON DELETE SET NULL,
 
-    FOREIGN KEY (category_id)
-        REFERENCES outage_categories(id)
-        ON DELETE RESTRICT,
-
-    FOREIGN KEY (severity_id)
-        REFERENCES severity_levels(id)
-        ON DELETE RESTRICT,
-
-    FOREIGN KEY (hazard_type_id)
-        REFERENCES hazard_types(id)
-        ON DELETE RESTRICT,
-
-    FOREIGN KEY (status_id)
-        REFERENCES outage_statuses(id)
-        ON DELETE RESTRICT
+    FOREIGN KEY (updated_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
 );
 
 CREATE INDEX idx_outage_coordinates
@@ -303,14 +153,14 @@ CREATE INDEX idx_outage_barangay
 ON outage_reports(barangay_id);
 
 CREATE INDEX idx_outage_status
-ON outage_reports(status_id);
+ON outage_reports(status);
 
 CREATE INDEX idx_outage_created
 ON outage_reports(created_at);
 
 
 -- =========================================================
--- 10. OUTAGE REPORT IMAGES
+-- 4. OUTAGE REPORT IMAGES
 -- =========================================================
 
 CREATE TABLE outage_report_images (
@@ -335,41 +185,7 @@ CREATE TABLE outage_report_images (
 
 
 -- =========================================================
--- 11. OUTAGE REPORT UPDATES
--- =========================================================
-
-CREATE TABLE outage_report_updates (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    outage_report_id INT NOT NULL,
-
-    updated_by INT NOT NULL,
-
-    status_id INT NULL,
-
-    update_message TEXT NOT NULL,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (outage_report_id)
-        REFERENCES outage_reports(id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (updated_by)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (status_id)
-        REFERENCES outage_statuses(id)
-        ON DELETE SET NULL
-);
-
-CREATE INDEX idx_outage_updates_report
-ON outage_report_updates(outage_report_id);
-
-
--- =========================================================
--- 12. OUTAGE REPORT VERIFICATIONS
+-- 5. OUTAGE REPORT VERIFICATIONS
 -- =========================================================
 
 CREATE TABLE outage_report_verifications (
@@ -403,7 +219,7 @@ ON outage_report_verifications(outage_report_id);
 
 
 -- =========================================================
--- 13. OUTAGE SPATIAL CLUSTERS
+-- 6. OUTAGE SPATIAL CLUSTERS
 -- =========================================================
 
 CREATE TABLE outage_clusters (
@@ -420,8 +236,6 @@ CREATE TABLE outage_clusters (
     radius_meters INT NOT NULL DEFAULT 500,
 
     report_count INT NOT NULL DEFAULT 0,
-
-    affected_houses INT NOT NULL DEFAULT 0,
 
     confidence_score DECIMAL(5,2) NOT NULL DEFAULT 0.00,
 
@@ -457,33 +271,7 @@ ON outage_clusters(confidence_score);
 
 
 -- =========================================================
--- 14. OUTAGE CLUSTER REPORTS
--- =========================================================
-
-CREATE TABLE outage_cluster_reports (
-    cluster_id INT NOT NULL,
-
-    outage_report_id INT NOT NULL,
-
-    distance_meters DECIMAL(10,2) NULL,
-
-    PRIMARY KEY (
-        cluster_id,
-        outage_report_id
-    ),
-
-    FOREIGN KEY (cluster_id)
-        REFERENCES outage_clusters(id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (outage_report_id)
-        REFERENCES outage_reports(id)
-        ON DELETE CASCADE
-);
-
-
--- =========================================================
--- 15. MAINTENANCE SCHEDULES
+-- 7. MAINTENANCE SCHEDULES
 -- =========================================================
 
 CREATE TABLE maintenance_schedules (
@@ -522,7 +310,7 @@ CREATE TABLE maintenance_schedules (
 
 
 -- =========================================================
--- 16. MAINTENANCE LOCATIONS
+-- 8. MAINTENANCE LOCATIONS
 -- =========================================================
 
 CREATE TABLE maintenance_locations (
@@ -550,26 +338,7 @@ ON maintenance_locations(barangay_id);
 
 
 -- =========================================================
--- 17. POWER STATION TYPES
--- =========================================================
-
-CREATE TABLE power_station_types (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    type_name VARCHAR(100) NOT NULL UNIQUE
-);
-
-INSERT INTO power_station_types
-(type_name)
-VALUES
-('power_station'),
-('solar_station'),
-('charging_station'),
-('generator_station');
-
-
--- =========================================================
--- 18. POWER STATIONS
+-- 9. POWER STATIONS
 -- =========================================================
 
 CREATE TABLE power_stations (
@@ -579,7 +348,7 @@ CREATE TABLE power_stations (
 
     barangay_id INT NULL,
 
-    station_type_id INT NOT NULL,
+    station_type ENUM('power_station','solar_station','charging_station','generator_station') NOT NULL,
 
     station_name VARCHAR(255) NOT NULL,
 
@@ -601,13 +370,13 @@ CREATE TABLE power_stations (
         'maintenance'
     ) DEFAULT 'available',
 
-    operating_hours VARCHAR(100) NULL,
+    opening_time TIME NULL,
+    closing_time TIME NULL,
+    is_24_hours BOOLEAN DEFAULT FALSE,
 
-    charging_type VARCHAR(100) NULL,
+    charging_type ENUM('usb','outlet','fast_charge','solar','mixed') NULL,
 
     description TEXT NULL,
-
-    image TEXT NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -620,11 +389,7 @@ CREATE TABLE power_stations (
 
     FOREIGN KEY (barangay_id)
         REFERENCES barangays(id)
-        ON DELETE SET NULL,
-
-    FOREIGN KEY (station_type_id)
-        REFERENCES power_station_types(id)
-        ON DELETE RESTRICT
+        ON DELETE SET NULL
 );
 
 CREATE INDEX idx_station_location
@@ -635,7 +400,7 @@ ON power_stations(availability_status);
 
 
 -- =========================================================
--- 19. BATTERY DEVICES
+-- 10. BATTERY DEVICES
 -- =========================================================
 
 CREATE TABLE battery_devices (
@@ -675,7 +440,7 @@ ON battery_devices(user_id);
 
 
 -- =========================================================
--- 20. BATTERY USAGE LOGS
+-- 11. BATTERY USAGE LOGS
 -- =========================================================
 
 CREATE TABLE battery_usage_logs (
@@ -705,7 +470,7 @@ ON battery_usage_logs(battery_device_id);
 
 
 -- =========================================================
--- 21. FLOOD REPORTS
+-- 12. FLOOD REPORTS
 -- =========================================================
 
 CREATE TABLE flood_reports (
@@ -723,11 +488,11 @@ CREATE TABLE flood_reports (
 
     flood_depth_cm DECIMAL(8,2) NULL,
 
-    flood_level ENUM(
+    severity ENUM(
         'low',
         'moderate',
         'high',
-        'severe'
+        'critical'
     ) NOT NULL DEFAULT 'low',
 
     description TEXT NULL,
@@ -742,6 +507,8 @@ CREATE TABLE flood_reports (
 
     reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+    updated_by INT NULL,
+
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
@@ -751,6 +518,10 @@ CREATE TABLE flood_reports (
 
     FOREIGN KEY (barangay_id)
         REFERENCES barangays(id)
+        ON DELETE SET NULL,
+
+    FOREIGN KEY (updated_by)
+        REFERENCES users(id)
         ON DELETE SET NULL
 );
 
@@ -762,7 +533,7 @@ ON flood_reports(barangay_id);
 
 
 -- =========================================================
--- 22. ELECTRICAL HAZARDS
+-- 13. ELECTRICAL HAZARDS
 -- =========================================================
 
 CREATE TABLE electrical_hazards (
@@ -772,7 +543,9 @@ CREATE TABLE electrical_hazards (
 
     barangay_id INT NULL,
 
-    hazard_type_id INT NOT NULL,
+    hazard_type ENUM('none','smoke','sparks','fire','fallen_wire',
+        'explosion_sound','submerged_electrical_equipment','low_hanging_cable',
+        'exposed_wire','electrical_shock_risk') NOT NULL,
 
     location_name VARCHAR(255) NOT NULL,
 
@@ -801,6 +574,11 @@ CREATE TABLE electrical_hazards (
 
     resolved_at DATETIME NULL,
 
+    updated_by INT NULL,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
     FOREIGN KEY (reported_by)
         REFERENCES users(id)
         ON DELETE CASCADE,
@@ -809,9 +587,9 @@ CREATE TABLE electrical_hazards (
         REFERENCES barangays(id)
         ON DELETE SET NULL,
 
-    FOREIGN KEY (hazard_type_id)
-        REFERENCES hazard_types(id)
-        ON DELETE RESTRICT
+    FOREIGN KEY (updated_by)
+        REFERENCES users(id)
+        ON DELETE SET NULL
 );
 
 CREATE INDEX idx_electrical_hazard_coordinates
@@ -822,57 +600,7 @@ ON electrical_hazards(barangay_id);
 
 
 -- =========================================================
--- 23. SAFETY TIMER TYPES
--- =========================================================
-
-CREATE TABLE safety_timer_types (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    timer_name VARCHAR(100) NOT NULL UNIQUE,
-
-    default_duration_hours DECIMAL(6,2) NOT NULL,
-
-    warning_hours_before DECIMAL(6,2) NOT NULL,
-
-    description VARCHAR(255) NULL
-);
-
-INSERT INTO safety_timer_types
-(
-    timer_name,
-    default_duration_hours,
-    warning_hours_before,
-    description
-)
-VALUES
-(
-    'sealed_refrigerator',
-    4,
-    1,
-    'Food safety timer for a sealed refrigerator'
-),
-(
-    'deep_freezer_24h',
-    24,
-    4,
-    'Conservative deep freezer safety timer'
-),
-(
-    'deep_freezer_48h',
-    48,
-    6,
-    'Extended deep freezer safety timer'
-),
-(
-    'medication',
-    4,
-    1,
-    'Medication temperature safety timer'
-);
-
-
--- =========================================================
--- 24. SAFETY TIMERS
+-- 14. SAFETY TIMERS
 -- =========================================================
 
 CREATE TABLE safety_timers (
@@ -880,7 +608,7 @@ CREATE TABLE safety_timers (
 
     user_id INT NOT NULL,
 
-    timer_type_id INT NOT NULL,
+    timer_type ENUM('sealed_refrigerator','deep_freezer_24h','deep_freezer_48h','medication') NOT NULL,
 
     title VARCHAR(150) NOT NULL,
 
@@ -889,6 +617,10 @@ CREATE TABLE safety_timers (
     expected_expiration_at DATETIME NOT NULL,
 
     warning_at DATETIME NULL,
+
+    warning_sent_at DATETIME NULL,
+
+    expired_sent_at DATETIME NULL,
 
     completed_at DATETIME NULL,
 
@@ -905,11 +637,7 @@ CREATE TABLE safety_timers (
 
     FOREIGN KEY (user_id)
         REFERENCES users(id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (timer_type_id)
-        REFERENCES safety_timer_types(id)
-        ON DELETE RESTRICT
+        ON DELETE CASCADE
 );
 
 CREATE INDEX idx_safety_timer_user
@@ -920,54 +648,7 @@ ON safety_timers(expected_expiration_at);
 
 
 -- =========================================================
--- 25. SAFETY TIMER ALERTS
--- =========================================================
-
-CREATE TABLE safety_timer_alerts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    safety_timer_id INT NOT NULL,
-
-    alert_type ENUM(
-        'warning',
-        'expired'
-    ) NOT NULL,
-
-    sent_at DATETIME NULL,
-
-    is_sent BOOLEAN DEFAULT FALSE,
-
-    FOREIGN KEY (safety_timer_id)
-        REFERENCES safety_timers(id)
-        ON DELETE CASCADE
-);
-
-
--- =========================================================
--- 26. NOTIFICATION TYPES
--- =========================================================
-
-CREATE TABLE notification_types (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-
-    type_name VARCHAR(100) NOT NULL UNIQUE
-);
-
-INSERT INTO notification_types
-(type_name)
-VALUES
-('maintenance'),
-('outage'),
-('emergency'),
-('flood'),
-('electrical_hazard'),
-('battery'),
-('safety_timer'),
-('system');
-
-
--- =========================================================
--- 27. NOTIFICATIONS
+-- 15. NOTIFICATIONS
 -- =========================================================
 
 CREATE TABLE notifications (
@@ -975,7 +656,7 @@ CREATE TABLE notifications (
 
     user_id INT NOT NULL,
 
-    notification_type_id INT NOT NULL,
+    notification_type ENUM('maintenance','outage','emergency','flood','electrical_hazard','battery','safety_timer','system') NOT NULL,
 
     title VARCHAR(255) NOT NULL,
 
@@ -998,10 +679,6 @@ CREATE TABLE notifications (
     FOREIGN KEY (user_id)
         REFERENCES users(id)
         ON DELETE CASCADE,
-
-    FOREIGN KEY (notification_type_id)
-        REFERENCES notification_types(id)
-        ON DELETE RESTRICT,
 
     FOREIGN KEY (outage_report_id)
         REFERENCES outage_reports(id)
@@ -1030,14 +707,12 @@ ON notifications(user_id);
 CREATE INDEX idx_notifications_read
 ON notifications(is_read);
 
+CREATE INDEX idx_notifications_user_read
+ON notifications(user_id, is_read);
+
 
 -- =========================================================
--- 28. LINEMAN ASSIGNMENTS
---
--- Which `lineman` covers which barangay. Read by the backend (auth/lineman_access.php)
--- to scope outage access, never by the client. Kept identical to the standalone
--- migration in database/002_lineman_assignments.sql, which is what an existing
--- database is upgraded with.
+-- 16. LINEMAN ASSIGNMENTS
 -- =========================================================
 
 CREATE TABLE lineman_assignments (
@@ -1057,8 +732,6 @@ CREATE TABLE lineman_assignments (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
-    /* RESTRICT, not CASCADE: dropping a user or barangay that is covered by an
-       assignment has to be a deliberate act, not a cascade. */
     FOREIGN KEY (lineman_id)
         REFERENCES users(id)
         ON DELETE RESTRICT,
@@ -1071,8 +744,6 @@ CREATE TABLE lineman_assignments (
         REFERENCES users(id)
         ON DELETE RESTRICT,
 
-    /* One row per lineman/barangay pair, so a re-assignment reactivates that row
-       instead of inserting a duplicate. */
     UNIQUE KEY uq_lineman_assignments_pair (lineman_id, barangay_id)
 );
 
@@ -1084,23 +755,29 @@ ON lineman_assignments(barangay_id);
 
 
 -- =========================================================
--- 29. DAGUPAN CITY BARANGAYS
+-- 17. DAGUPAN CITY BARANGAYS
 -- =========================================================
 
 -- Coordinates make the barangay the source of truth for a record's position:
 -- a report's point is its barangay's centroid, and the address text is only a
--- label. See database/003_barangay_coordinates.sql for how they were resolved
--- and for the 11 barangays still awaiting a hand-entered value - those are left
--- NULL here on purpose rather than guessed at, and the API rejects a report in
--- a barangay whose coordinates are missing.
+-- label. Coordinates are baked in here; barangays still awaiting a hand-entered
+-- value are left NULL on purpose rather than guessed at, and the API rejects a
+-- report in a barangay whose coordinates are missing.
+--
+-- The 31 barangays below match the official Philippine Standard Geographic Code
+-- (PSGC) list for City of Dagupan, Pangasinan (as of 31 July 2025). Barangays
+-- that appeared in an older draft but are NOT official Dagupan barangays were
+-- removed: Bacag (in Urdaneta), Balsadan, Barangay III (only I, II, IV exist),
+-- Dapdap, Dumalneg (a municipality in Ilocos Norte), Poblacion Este, Sapanglang,
+-- Tippler. 'Poblacion' was a duplicate of 'Poblacion Oeste' and removed.
+-- Missing official barangays added: Pogo Chico, Pogo Grande, Pugaro Suit.
+-- Barangay I, II, and IV remain NULL - exact coordinates could not be verified
+-- from an authoritative source and are intentionally not guessed.
 INSERT INTO barangays (barangay_name, latitude, longitude) VALUES
 ('Bacayao Norte', 16.0321184, 120.343659),
 ('Bacayao Sur', 16.0224982, 120.3460497),
-('Bacag', NULL, NULL),
-('Balsadan', NULL, NULL),
 ('Barangay I', NULL, NULL),
 ('Barangay II', NULL, NULL),
-('Barangay III', NULL, NULL),
 ('Barangay IV', NULL, NULL),
 ('Bolosan', 16.0470283, 120.3653888),
 ('Bonuan Binloc', 16.1019298, 120.3797034),
@@ -1109,8 +786,6 @@ INSERT INTO barangays (barangay_name, latitude, longitude) VALUES
 ('Calmay', 16.0452879, 120.325569),
 ('Carael', 16.05, 120.31667),
 ('Caranglaan', 16.0306481, 120.3499153),
-('Dapdap', NULL, NULL),
-('Dumalneg', NULL, NULL),
 ('Herrero', 16.0439297, 120.3422628),
 ('Lasip Chico', 16.0216379, 120.3402722),
 ('Lasip Grande', 16.0286206, 120.3432008),
@@ -1121,16 +796,15 @@ INSERT INTO barangays (barangay_name, latitude, longitude) VALUES
 ('Mangin', 16.0388765, 120.3673354),
 ('Mayombo', 16.0418406, 120.346308),
 ('Pantal', 16.0461741, 120.3387457),
-('Poblacion', 16.0432792, 120.3295612),
 ('Poblacion Oeste', 16.0432792, 120.3295612),
-('Poblacion Este', NULL, NULL),
+('Pogo Chico', NULL, NULL),
+('Pogo Grande', NULL, NULL),
+('Pugaro Suit', NULL, NULL),
 ('Salapingao', 16.0589914, 120.3217036),
 ('Salisay', 16.0423396, 120.3714122),
-('Sapanglang', NULL, NULL),
 ('Tambac', 16.046036, 120.3563194),
-('Tebeng', 16.0320226, 120.3588773),
-('Tippler', NULL, NULL),
-('Tapuac', 16.0323968, 120.3302149);
+('Tapuac', 16.0323968, 120.3302149),
+('Tebeng', 16.0320226, 120.3588773);
 
 
 -- =========================================================

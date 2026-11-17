@@ -21,7 +21,7 @@ try {
     /* Optional filters: ?role=<role_name> and ?q=<name or email substring>. */
     $role = trim($_GET['role'] ?? '');
     if ($role !== '') {
-        $conditions[] = "r.role_name = :role";
+        $conditions[] = "u.role = :role";
         $params[':role'] = $role;
     }
 
@@ -47,12 +47,10 @@ try {
             u.last_name,
             u.email,
             u.auth_provider,
-            u.role_id,
-            r.role_name,
+            u.role,
             u.last_login,
             u.created_at
         FROM users u
-        JOIN roles r ON r.id = u.role_id
         $where
         ORDER BY u.created_at DESC, u.id DESC
     ");
@@ -65,8 +63,7 @@ try {
             "name"          => trim($row['first_name'] . ' ' . $row['last_name']),
             "email"         => $row['email'],
             "auth_provider" => $row['auth_provider'],
-            "role_id"       => (int)$row['role_id'],
-            "role"          => $row['role_name'],
+            "role"          => $row['role'],
             "last_login"    => $row['last_login'],
             "created_at"    => $row['created_at'],
         ];

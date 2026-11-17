@@ -52,33 +52,51 @@ if (!$user) {
 
 $user_id = $user['id'];
 
-try {
-    $rejectedId = getStatusId($conn, 'rejected');
+// Make sure the report exists and belongs to this user before deciding what to do with it.
+$stmt = $conn->prepare("
+    SELECT id, status
+    FROM outage_reports
+    WHERE id = :id
+    AND user_id = :user_id
+    LIMIT 1
+");
+$stmt->execute([
+    ":id" => $id,
+    ":user_id" => $user_id
+]);
+$report = $stmt->fetch(PDO::FETCH_ASSOC);
 
+if (!$report) {
+    http_response_code(404);
+    echo json_encode(["success" => false, "message" => "Report not found."]);
+    exit;
+}
+
+// A report that has already been verified / resolved / rejected can no longer be cancelled.
+if (!in_array($report['status'], ['active', 'under_review'], true)) {
+    http_response_code(400);
+    echo json_encode([
+        "success" => false,
+        "message" => "This report has already been verified and cannot be deleted."
+    ]);
+    exit;
+}
+
+try {
     $stmt = $conn->prepare("
         UPDATE outage_reports
         SET
-            status_id = :status_id,
-            is_active = 0,
+            status = :status,
             resolution_note = 'Cancelled by user'
         WHERE id = :id
         AND user_id = :user_id
-        AND status_id IN (
-            SELECT id FROM outage_statuses WHERE status_name IN ('active','under_review')
-        )
     ");
 
     $stmt->execute([
-        ":status_id" => $rejectedId,
+        ":status" => 'rejected',
         ":id" => $id,
         ":user_id" => $user_id
     ]);
-
-    if ($stmt->rowCount() === 0) {
-        http_response_code(404);
-        echo json_encode(["success" => false, "message" => "Report not found or already processed"]);
-        exit;
-    }
 
     echo json_encode([
         "success" => true,

@@ -29,10 +29,9 @@ $sql = "
         eh.reported_at,
         eh.resolved_at,
         b.barangay_name,
-        ht.hazard_name AS hazard_type
+        eh.hazard_type
     FROM electrical_hazards eh
     LEFT JOIN barangays b ON b.id = eh.barangay_id
-    LEFT JOIN hazard_types ht ON ht.id = eh.hazard_type_id
     WHERE 1=1
 ";
 

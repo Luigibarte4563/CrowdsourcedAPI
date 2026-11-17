@@ -37,8 +37,7 @@ try {
         LEFT JOIN users u ON u.id = ms.created_by
         LEFT JOIN maintenance_locations ml ON ml.maintenance_id = ms.id
         LEFT JOIN barangays b ON b.id = ml.barangay_id
-        LEFT JOIN roles r ON r.id = u.role_id
-        WHERE r.role_name = 'electric_company'
+        WHERE u.role = 'electric_company'
         ORDER BY ms.id DESC
     ";
 

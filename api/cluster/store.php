@@ -28,7 +28,6 @@ $center_lat      = isset($data["latitude"]) ? (float)$data["latitude"] : null;
 $center_lng      = isset($data["longitude"]) ? (float)$data["longitude"] : null;
 $radius_meters   = (int)($data["radius_meters"] ?? 500);
 $report_count    = (int)($data["report_count"] ?? 1);
-$affected_houses = (int)($data["affected_houses"] ?? 0);
 $confidence      = isset($data["confidence_score"]) ? (float)$data["confidence_score"] : 0.0;
 $severity_score  = isset($data["severity_score"]) ? (float)$data["severity_score"] : 0.0;
 $forecast_level  = $data["forecast_level"] ?? "low";
@@ -52,11 +51,11 @@ try {
     $insert = $conn->prepare("
         INSERT INTO outage_clusters (
             barangay_id, cluster_date, center_latitude, center_longitude,
-            radius_meters, report_count, affected_houses,
+            radius_meters, report_count,
             confidence_score, severity_score, forecast_level, status
         ) VALUES (
             :barangay_id, :cluster_date, :center_lat, :center_lng,
-            :radius, :report_count, :affected_houses,
+            :radius, :report_count,
             :confidence, :severity, :forecast, 'active'
         )
     ");
@@ -67,30 +66,11 @@ try {
         ":center_lng"      => $center_lng,
         ":radius"          => $radius_meters,
         ":report_count"    => $report_count,
-        ":affected_houses" => $affected_houses,
         ":confidence"      => $confidence,
         ":severity"        => $severity_score,
         ":forecast"        => $forecast_level
     ]);
     $cluster_id = (int)$conn->lastInsertId();
-
-    /* Link the constituent reports with their distance from the center */
-    $link = $conn->prepare("
-        INSERT IGNORE INTO outage_cluster_reports (cluster_id, outage_report_id, distance_meters)
-        VALUES (?, ?, ?)
-    ");
-    foreach ($report_ids as $rid) {
-        $rid = (int)$rid;
-        if ($rid <= 0) continue;
-        $detail = $conn->prepare("SELECT latitude, longitude FROM outage_reports WHERE id = ? LIMIT 1");
-        $detail->execute([$rid]);
-        $r = $detail->fetch(PDO::FETCH_ASSOC);
-        $distance = null;
-        if ($r && $r['latitude'] !== null && $r['longitude'] !== null) {
-            $distance = haversineDistanceMeters($center_lat, $center_lng, (float)$r['latitude'], (float)$r['longitude']);
-        }
-        $link->execute([$cluster_id, $rid, $distance]);
-    }
 
     echo json_encode([
         "success" => true,

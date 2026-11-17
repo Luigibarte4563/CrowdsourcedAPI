@@ -41,15 +41,16 @@ $stmt = $conn->prepare("
         ps.location_name,
         ps.latitude,
         ps.longitude,
-        ps.station_type_id,
+        ps.station_type,
         ps.access_type,
         ps.availability_status,
-        ps.operating_hours,
+        ps.opening_time,
+        ps.closing_time,
+        ps.is_24_hours,
         ps.charging_type,
         ps.description,
-        pst.type_name AS station_type
+        ps.barangay_id
     FROM power_stations ps
-    JOIN power_station_types pst ON pst.id = ps.station_type_id
     WHERE ps.id = :id AND ps.created_by = :user_id
     LIMIT 1
 ");
@@ -74,7 +75,6 @@ $availability_status = $data["availability_status"] ?? $station["availability_st
 if (!in_array($station_type, $valid_station_types)) {
     $station_type = $station["station_type"];
 }
-$station_type_id = getStationTypeId($conn, $station_type);
 
 if (!in_array($access_type, $valid_access_types)) {
     $access_type = $station["access_type"];
@@ -86,7 +86,9 @@ if (!in_array($availability_status, $valid_status)) {
 /* INPUT FIELDS */
 $station_name = $data["station_name"] ?? $station["station_name"];
 $location_name = $data["location_name"] ?? $station["location_name"];
-$operating_hours = $data["operating_hours"] ?? $station["operating_hours"];
+$opening_time = $data["opening_time"] ?? $station["opening_time"];
+$closing_time = $data["closing_time"] ?? $station["closing_time"];
+$is_24_hours = $data["is_24_hours"] ?? $station["is_24_hours"];
 $charging_type = $data["charging_type"] ?? $station["charging_type"];
 $description = $data["description"] ?? $station["description"];
 
@@ -155,10 +157,12 @@ try {
             location_name = :location_name,
             latitude = :latitude,
             longitude = :longitude,
-            station_type_id = :station_type_id,
+            station_type = :station_type,
             access_type = :access_type,
             availability_status = :availability_status,
-            operating_hours = :operating_hours,
+            opening_time = :opening_time,
+            closing_time = :closing_time,
+            is_24_hours = :is_24_hours,
             charging_type = :charging_type,
             description = :description,
             barangay_id = :barangay_id
@@ -173,10 +177,12 @@ try {
         ":location_name" => $location_name,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
-        ":station_type_id" => $station_type_id,
+        ":station_type" => $station_type,
         ":access_type" => $access_type,
         ":availability_status" => $availability_status,
-        ":operating_hours" => $operating_hours,
+        ":opening_time" => $opening_time,
+        ":closing_time" => $closing_time,
+        ":is_24_hours" => $is_24_hours,
         ":charging_type" => $charging_type,
         ":description" => $description,
         ":barangay_id" => $barangay_id

@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/lookup.php';
+
 /**
  * Creates notifications for the new normalized `notifications` schema.
  *
@@ -26,19 +28,9 @@ function createNotification(
     $userIds = array_values(array_unique(array_map('intval', $userIds)));
     if (empty($userIds)) return false;
 
-    /* Resolve notification type name -> id */
-    $typeStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = ? LIMIT 1");
-    $typeStmt->execute([$type]);
-    $typeRow = $typeStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$typeRow) {
-        $typeStmt = $conn->prepare("SELECT id FROM notification_types WHERE type_name = 'system' LIMIT 1");
-        $typeStmt->execute();
-        $typeRow = $typeStmt->fetch(PDO::FETCH_ASSOC);
-    }
-
-    $typeId = $typeRow ? (int)$typeRow['id'] : null;
-    if (!$typeId) return false;
+    /* Resolve notification type name (ENUM validated) */
+    $type = getNotificationType($type);
+    if (!$type) return false;
 
     /* Map source type to a reference FK column (whitelist only) */
     $refMap = [
@@ -58,14 +50,14 @@ function createNotification(
     $insert = $conn->prepare("
         INSERT INTO notifications (
             user_id,
-            notification_type_id,
+            notification_type,
             title,
             message,
             is_read
             $colSql
         ) VALUES (
             :user_id,
-            :type_id,
+            :type,
             :title,
             :message,
             0
@@ -76,7 +68,7 @@ function createNotification(
     foreach ($userIds as $id) {
         $params = [
             ":user_id"  => $id,
-            ":type_id"  => $typeId,
+            ":type"     => $type,
             ":title"    => $title,
             ":message"  => $message
         ];

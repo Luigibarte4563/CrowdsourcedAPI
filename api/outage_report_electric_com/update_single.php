@@ -41,12 +41,11 @@ try {
        runs before the UPDATE, so a denied request changes nothing. */
     require_outage_access($conn, $user, $id);
 
-    $statusId = getStatusId($conn, $status);
-    $sql = "UPDATE outage_reports SET status_id = :status_id, updated_at = NOW()";
-    $params = [":status_id" => $statusId, ":id" => $id];
+    $sql = "UPDATE outage_reports SET status = :status, updated_at = NOW()";
+    $params = [":status" => $status, ":id" => $id];
 
     if ($status === "resolved") {
-        $sql .= ", resolved_at = NOW(), is_active = 0";
+        $sql .= ", resolved_at = NOW()";
     }
 
     $sql .= " WHERE id = :id";

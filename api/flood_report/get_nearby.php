@@ -29,7 +29,7 @@ $sql = "
         fr.latitude,
         fr.longitude,
         fr.flood_depth_cm,
-        fr.flood_level,
+        fr.severity,
         fr.description,
         fr.image_proof,
         fr.status,

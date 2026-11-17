@@ -12,7 +12,7 @@ $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 requireAuthUser();
 
 $status     = $_GET['status'] ?? null;
-$flood_level = $_GET['flood_level'] ?? null;
+$severity   = $_GET['severity'] ?? null;
 $barangay   = $_GET['barangay'] ?? null;
 
 $sql = "
@@ -23,7 +23,7 @@ $sql = "
         fr.latitude,
         fr.longitude,
         fr.flood_depth_cm,
-        fr.flood_level,
+        fr.severity,
         fr.description,
         fr.image_proof,
         fr.status,
@@ -41,9 +41,9 @@ if (!empty($status)) {
     $sql .= " AND fr.status = :status";
     $params[':status'] = $status;
 }
-if (!empty($flood_level)) {
-    $sql .= " AND fr.flood_level = :flood_level";
-    $params[':flood_level'] = $flood_level;
+if (!empty($severity)) {
+    $sql .= " AND fr.severity = :severity";
+    $params[':severity'] = $severity;
 }
 if (!empty($barangay)) {
     $sql .= " AND b.barangay_name = :barangay";

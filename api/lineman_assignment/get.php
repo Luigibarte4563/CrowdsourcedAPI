@@ -70,14 +70,12 @@ $sql = "
         au.last_name  AS assigned_by_last_name,
         la.created_at,
         la.updated_at,
-        la.status,
-        la.work_type
+        la.status
     FROM lineman_assignments la
     JOIN users lu      ON lu.id = la.lineman_id
-    JOIN roles lr      ON lr.id = lu.role_id
     JOIN barangays b   ON b.id  = la.barangay_id
     JOIN users au      ON au.id = la.assigned_by
-    WHERE 1=1
+    WHERE lu.role = 'lineman'
 ";
 
 $params = [];
@@ -95,9 +93,7 @@ if ($status !== null) {
     $params[':status'] = $status;
 }
 
-/* Defensive: a row whose user is somehow no longer a lineman is not an assignment. */
-$sql .= " AND lr.role_name = 'lineman'";
-
+/* Defensive: lu.role = 'lineman' above already enforces this at row level. */
 $sql .= " ORDER BY la.status ASC, la.created_at DESC, la.id DESC";
 
 try {
@@ -119,8 +115,7 @@ try {
                assigned_at because that is what the assignment date means to a reader. */
             "assigned_at"      => $row['created_at'],
             "updated_at"       => $row['updated_at'],
-            "status"           => $row['status'],
-            "work_type"        => $row['work_type']
+            "status"           => $row['status']
         ];
     }
 

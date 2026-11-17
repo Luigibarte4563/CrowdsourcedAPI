@@ -36,8 +36,8 @@ if ($location_name === "") {
     exit;
 }
 
-$hazard_type_id = getHazardTypeId($conn, $hazard_name);
-if (!$hazard_type_id) {
+$hazardType = getHazardType($hazard_name);
+if (!$hazardType) {
     http_response_code(400);
     echo json_encode(["success" => false, "message" => "Invalid hazard_type"]);
     exit;
@@ -105,14 +105,14 @@ if (
 try {
     $stmt = $conn->prepare("
         INSERT INTO electrical_hazards (
-            reported_by, barangay_id, hazard_type_id, location_name, latitude,
+            reported_by, barangay_id, hazard_type, location_name, latitude,
             longitude, description, severity, image_proof
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
     $stmt->execute([
         $user_id,
         $barangay_id,
-        $hazard_type_id,
+        $hazardType,
         $location_name,
         $latitude,
         $longitude,

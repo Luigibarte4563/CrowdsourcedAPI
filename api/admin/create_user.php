@@ -37,7 +37,7 @@ $middle_name = trim($data["middle_name"] ?? "");
 $last_name   = trim($data["last_name"] ?? "");
 $email       = strtolower(trim($data["email"] ?? ""));
 $password    = $data["password"] ?? "";
-$roleId      = (int)($data["role_id"] ?? 0);
+$role        = ($data["role"] ?? 'user');
 
 if ($first_name === "" || $last_name === "" || $email === "" || $password === "") {
     http_response_code(400);
@@ -61,23 +61,10 @@ if (strlen($password) < 6) {
 }
 
 try {
-    if ($roleId > 0) {
-        $roleStmt = $conn->prepare("SELECT id, role_name FROM roles WHERE id = ? LIMIT 1");
-        $roleStmt->execute([$roleId]);
-        $role = $roleStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$role) {
-            http_response_code(400);
-            echo json_encode(["success" => false, "message" => "Unknown role"]);
-            exit;
-        }
-    } else {
-        $roleId = (int)getRoleIdByName('user');
-        $role = ["id" => $roleId, "role_name" => 'user'];
-        if (!$roleId) {
-            http_response_code(500);
-            echo json_encode(["success" => false, "message" => "Role configuration missing"]);
-            exit;
-        }
+    if (!in_array($role, ['user', 'lineman', 'electric_company', 'admin'], true)) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "Unknown role"]);
+        exit;
     }
 
     $dupStmt = $conn->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
@@ -96,7 +83,7 @@ try {
             email,
             password,
             auth_provider,
-            role_id
+            role
         ) VALUES (?, ?, ?, ?, ?, 'local', ?)
     ");
     $insert->execute([
@@ -105,7 +92,7 @@ try {
         $last_name,
         $email,
         password_hash($password, PASSWORD_DEFAULT),
-        $roleId
+        $role
     ]);
 
     http_response_code(201);
@@ -117,8 +104,7 @@ try {
             "name"          => trim($first_name . ' ' . $last_name),
             "email"         => $email,
             "auth_provider" => 'local',
-            "role_id"       => (int)$role['id'],
-            "role"          => $role['role_name'],
+            "role"          => $role,
         ],
     ]);
 } catch (Throwable $e) {

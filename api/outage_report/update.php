@@ -52,13 +52,12 @@ try {
     /* ================= SAFE INPUT ================= */
     $location_name   = trim($data["location_name"] ?? $report["location_name"]);
     $description     = trim($data["description"] ?? $report["description"]);
-    $affected_houses = max(1, (int)($data["affected_houses"] ?? $report["affected_houses"]));
     $started_at      = $data["started_at"] ?? $report["started_at"];
 
     /* Lookup ids (strings -> normalized) */
-    $category_id    = getCategoryId($conn, $data["category"] ?? getCategoryNameById($conn, $report["category_id"]));
-    $severity_id    = getSeverityId($conn, $data["severity"] ?? getSeverityNameById($conn, $report["severity_id"]));
-    $hazard_type_id = getHazardTypeId($conn, $data["hazard_type"] ?? getHazardNameById($conn, $report["hazard_type_id"]));
+    $category   = getCategory($data["category"] ?? $report["category"]);
+    $severity   = getSeverity($conn, $data["severity"] ?? $report["severity"]);
+    $hazardType = getHazardType($data["hazard_type"] ?? $report["hazard_type"]);
 
     $latitude  = (float)$report["latitude"];
     $longitude = (float)$report["longitude"];
@@ -118,14 +117,13 @@ try {
     $stmt = $conn->prepare("
         UPDATE outage_reports SET
             barangay_id = :barangay_id,
-            category_id = :category_id,
-            severity_id = :severity_id,
-            hazard_type_id = :hazard_type_id,
+            category = :category,
+            severity = :severity,
+            hazard_type = :hazard_type,
             location_name = :location_name,
             latitude = :latitude,
             longitude = :longitude,
             description = :description,
-            affected_houses = :affected_houses,
             started_at = :started_at,
             updated_at = NOW()
         WHERE id = :id
@@ -136,14 +134,13 @@ try {
         ":id" => $id,
         ":user_id" => $user_id,
         ":barangay_id" => $barangay_id,
-        ":category_id" => $category_id,
-        ":severity_id" => $severity_id,
-        ":hazard_type_id" => $hazard_type_id,
+        ":category" => $category,
+        ":severity" => $severity,
+        ":hazard_type" => $hazardType,
         ":location_name" => $location_name,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
         ":description" => $description,
-        ":affected_houses" => $affected_houses,
         ":started_at" => $started_at
     ]);
 

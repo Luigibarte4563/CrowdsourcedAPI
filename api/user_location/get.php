@@ -25,23 +25,24 @@ if (!$user_id) {
 
 try {
     $stmt = $conn->prepare("
-        SELECT ul.id, b.barangay_name, ul.barangay_id, ul.address, ul.latitude, ul.longitude, ul.updated_at
-        FROM user_locations ul
-        LEFT JOIN barangays b ON b.id = ul.barangay_id
-        WHERE ul.user_id = :user_id
-        ORDER BY ul.is_primary DESC, ul.id DESC
+        SELECT u.barangay_id, u.address, u.latitude, u.longitude, u.location_updated_at,
+               b.barangay_name
+        FROM users u
+        LEFT JOIN barangays b ON b.id = u.barangay_id
+        WHERE u.id = :user_id
         LIMIT 1
     ");
     $stmt->execute([":user_id" => $user_id]);
     $userData = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$userData) {
+    if (!$userData || $userData["latitude"] === null || $userData["longitude"] === null) {
         echo json_encode([
             "success" => true,
             "data" => [
                 "location_name" => null,
                 "address" => null,
                 "barangay" => null,
+                "barangay_id" => null,
                 "latitude" => null,
                 "longitude" => null,
                 "updated_at" => null
@@ -59,7 +60,7 @@ try {
             "barangay_id" => $userData["barangay_id"] !== null ? (int)$userData["barangay_id"] : null,
             "latitude" => $userData["latitude"],
             "longitude" => $userData["longitude"],
-            "updated_at" => $userData["updated_at"]
+            "updated_at" => $userData["location_updated_at"]
         ]
     ]);
 } catch (PDOException $e) {

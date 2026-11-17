@@ -38,25 +38,19 @@ try {
             orp.latitude,
             orp.longitude,
             orp.description,
-            orp.affected_houses,
-            orp.is_active,
             orp.started_at,
             orp.resolved_at,
             orp.resolution_note,
             orp.created_at,
             b.barangay_name,
-            oc.category_name AS category,
-            sv.severity_name AS severity,
-            hz.hazard_name AS hazard_type,
-            st.status_name AS status
+            orp.category AS category,
+            orp.severity AS severity,
+            orp.hazard_type AS hazard_type,
+            orp.status AS status
         FROM outage_reports orp
-        JOIN outage_categories oc ON oc.id = orp.category_id
-        JOIN severity_levels sv   ON sv.id = orp.severity_id
-        JOIN hazard_types hz     ON hz.id = orp.hazard_type_id
-        JOIN outage_statuses st  ON st.id = orp.status_id
         LEFT JOIN barangays b    ON b.id = orp.barangay_id
         WHERE orp.user_id = :user_id
-          AND st.status_name != 'rejected'
+          AND orp.status != 'rejected'
         ORDER BY orp.created_at DESC
     ");
     $stmt->execute([":user_id" => $user_id]);

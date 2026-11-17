@@ -19,7 +19,7 @@ try {
      * comparing stored timestamps against PHP time() mislabelled timers.
      */
     $stmt = $conn->prepare("
-        SELECT t.*, tt.timer_name, tt.default_duration_hours, tt.warning_hours_before, tt.description AS type_description,
+        SELECT t.*,
             CASE
                 WHEN t.status = 'stopped' THEN 'stopped'
                 WHEN t.expected_expiration_at <= NOW() THEN 'expired'
@@ -28,20 +28,12 @@ try {
             END AS computed_status,
             GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(), t.expected_expiration_at)) AS remaining_seconds
         FROM safety_timers t
-        LEFT JOIN safety_timer_types tt ON tt.id = t.timer_type_id
         WHERE t.user_id = :user_id
         ORDER BY t.id DESC
     ");
     $stmt->execute([":user_id" => $user_id]);
     $timers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $alertInsert = $conn->prepare("
-        INSERT IGNORE INTO safety_timer_alerts (safety_timer_id, alert_type, sent_at, is_sent)
-        VALUES (?, ?, NOW(), 1)
-    ");
-    $alertCheck = $conn->prepare("
-        SELECT id FROM safety_timer_alerts WHERE safety_timer_id = ? AND alert_type = ? AND is_sent = 1 LIMIT 1
-    ");
     $statusUpdate = $conn->prepare("UPDATE safety_timers SET status = ? WHERE id = ? AND user_id = ?");
 
     foreach ($timers as &$timer) {
@@ -51,11 +43,13 @@ try {
         $timer['status'] = $status;
         $statusUpdate->execute([$status, $timer['id'], $user_id]);
 
-        /* Record one-time alert (warning / expired) */
+        /* Record one-time alert (warning / expired) using sent_at columns on the timer */
         if ($status === 'warning' || $status === 'expired') {
-            $alertCheck->execute([$timer['id'], $status]);
-            if (!$alertCheck->fetch()) {
-                $alertInsert->execute([$timer['id'], $status]);
+            $sentCol = $status === 'warning' ? 'warning_sent_at' : 'expired_sent_at';
+            $alreadySent = $timer[$sentCol] !== null;
+            if (!$alreadySent) {
+                $conn->prepare("UPDATE safety_timers SET $sentCol = NOW() WHERE id = ? AND user_id = ?")
+                    ->execute([$timer['id'], $user_id]);
                 createNotification(
                     $conn,
                     [$user_id],

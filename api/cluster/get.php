@@ -23,7 +23,6 @@ $sql = "
         c.center_longitude,
         c.radius_meters,
         c.report_count,
-        c.affected_houses,
         c.confidence_score,
         c.severity_score,
         c.forecast_level,
@@ -56,23 +55,6 @@ try {
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);
     $clusters = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    /* Optionally attach constituent reports per cluster */
-    $includeReports = isset($_GET['include_reports']) && $_GET['include_reports'] === '1';
-    if ($includeReports) {
-        $reportStmt = $conn->prepare("
-            SELECT ocr.outage_report_id, ocr.distance_meters, o.report_key, o.location_name
-            FROM outage_cluster_reports ocr
-            JOIN outage_reports o ON o.id = ocr.outage_report_id
-            WHERE ocr.cluster_id = ?
-            ORDER BY ocr.distance_meters ASC
-        ");
-        foreach ($clusters as &$cl) {
-            $reportStmt->execute([$cl['id']]);
-            $cl['reports'] = $reportStmt->fetchAll(PDO::FETCH_ASSOC);
-        }
-        unset($cl);
-    }
 
     echo json_encode([
         "success" => true,

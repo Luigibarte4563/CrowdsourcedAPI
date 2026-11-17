@@ -45,9 +45,7 @@ try {
     $check = $conn->prepare("
         SELECT id FROM outage_reports
         WHERE user_id = ?
-          AND status_id IN (
-              SELECT id FROM outage_statuses WHERE status_name IN ('active','under_review','verified')
-          )
+          AND status IN ('active','under_review','verified')
         LIMIT 1
     ");
     $check->execute([$user_id]);
@@ -130,19 +128,18 @@ if (
 }
 
 /* =========================================
-   LOOKUP FIELDS (strings -> normalized ids)
+   LOOKUP FIELDS (strings -> ENUM values)
 ========================================= */
-$category_id    = getCategoryId($conn, $data["category"] ?? null);
-$severity_id    = getSeverityId($conn, $data["severity"] ?? null);
-$hazard_type_id = getHazardTypeId($conn, $data["hazard_type"] ?? null);
+$category   = getCategory($data["category"] ?? null);
+$severity   = getSeverity($conn, $data["severity"] ?? null);
+$hazardType = getHazardType($data["hazard_type"] ?? null);
 
-if (!$category_id || !$severity_id || !$hazard_type_id) {
+if (!$category || !$severity || !$hazardType) {
     http_response_code(400);
     echo json_encode(["success" => false, "message" => "Invalid lookup value"]);
     exit;
 }
 
-$affected_houses = max(1, (int)($data["affected_houses"] ?? 1));
 $started_at      = $data["started_at"] ?? null;
 $image_url       = $data["image_url"] ?? null;
 
@@ -154,36 +151,33 @@ try {
         INSERT INTO outage_reports (
             user_id,
             barangay_id,
-            category_id,
-            severity_id,
-            hazard_type_id,
-            status_id,
+            category,
+            severity,
+            hazard_type,
+            status,
             report_key,
             location_name,
             latitude,
             longitude,
             description,
-            affected_houses,
-            is_active,
             started_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
-    $status_id = getStatusId($conn, 'active');
+    $status = getStatus($conn, 'active');
 
     $stmt->execute([
         $user_id,
         $barangay_id,
-        $category_id,
-        $severity_id,
-        $hazard_type_id,
-        $status_id,
+        $category,
+        $severity,
+        $hazardType,
+        $status,
         uniqid("OR-"),
         $location_name,
         $latitude,
         $longitude,
         $description,
-        $affected_houses,
         $started_at
     ]);
 

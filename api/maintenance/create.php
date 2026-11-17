@@ -171,12 +171,10 @@ try {
     $notified = 0;
 
     $userStmt = $conn->prepare("
-        SELECT u.id, ul.latitude, ul.longitude, b.barangay_name AS user_barangay
+        SELECT u.id, u.latitude, u.longitude, b.barangay_name AS user_barangay
         FROM users u
-        JOIN roles r ON r.id = u.role_id
-        LEFT JOIN user_locations ul ON ul.user_id = u.id AND ul.is_primary = 1
-        LEFT JOIN barangays b ON b.id = ul.barangay_id
-        WHERE r.role_name = 'user'
+        LEFT JOIN barangays b ON b.id = u.barangay_id
+        WHERE u.role = 'user'
     ");
     $userStmt->execute();
     $users = $userStmt->fetchAll(PDO::FETCH_ASSOC);

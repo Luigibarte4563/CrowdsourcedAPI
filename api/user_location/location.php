@@ -83,46 +83,24 @@ $barangay_name = $barangay["name"];
 $latitude  = $barangay["latitude"];
 $longitude = $barangay["longitude"];
 
-/* UPSERT user_locations (is_primary) */
+/* UPSERT users location columns */
 try {
-    $existing = $conn->prepare("
-        SELECT id FROM user_locations
-        WHERE user_id = :user_id AND is_primary = 1
-        LIMIT 1
+    $stmt = $conn->prepare("
+        UPDATE users
+        SET barangay_id = :barangay_id,
+            address = :address,
+            latitude = :latitude,
+            longitude = :longitude,
+            location_updated_at = NOW()
+        WHERE id = :user_id
     ");
-    $existing->execute([":user_id" => $user_id]);
-    $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
-
-    if ($existingRow) {
-        $stmt = $conn->prepare("
-            UPDATE user_locations
-            SET barangay_id = :barangay_id,
-                address = :address,
-                latitude = :latitude,
-                longitude = :longitude,
-                updated_at = NOW()
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ":barangay_id" => $barangay_id,
-            ":address" => $address,
-            ":latitude" => $latitude,
-            ":longitude" => $longitude,
-            ":id" => $existingRow['id']
-        ]);
-    } else {
-        $stmt = $conn->prepare("
-            INSERT INTO user_locations (user_id, barangay_id, address, latitude, longitude, is_primary)
-            VALUES (:user_id, :barangay_id, :address, :latitude, :longitude, 1)
-        ");
-        $stmt->execute([
-            ":user_id" => $user_id,
-            ":barangay_id" => $barangay_id,
-            ":address" => $address,
-            ":latitude" => $latitude,
-            ":longitude" => $longitude
-        ]);
-    }
+    $stmt->execute([
+        ":barangay_id" => $barangay_id,
+        ":address" => $address,
+        ":latitude" => $latitude,
+        ":longitude" => $longitude,
+        ":user_id" => $user_id
+    ]);
 
     echo json_encode([
         "success" => true,

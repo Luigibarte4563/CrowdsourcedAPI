@@ -74,8 +74,6 @@ if (!in_array($station_type, $valid_station_types)) {
     $station_type = "power_station";
 }
 
-$station_type_id = getStationTypeId($conn, $station_type);
-
 if (!in_array($access_type, $valid_access_types)) {
     $access_type = "free";
 }
@@ -85,10 +83,11 @@ if (!in_array($availability_status, $valid_availability)) {
 }
 
 /* OPTIONAL FIELDS */
-$operating_hours = $data["operating_hours"] ?? null;
-$charging_type   = $data["charging_type"] ?? null;
-$description     = $data["description"] ?? null;
-$image           = $data["image"] ?? null;
+$opening_time   = $data["opening_time"] ?? null;
+$closing_time   = $data["closing_time"] ?? null;
+$is_24_hours    = isset($data["is_24_hours"]) && $data["is_24_hours"] ? true : false;
+$charging_type  = $data["charging_type"] ?? null;
+$description    = $data["description"] ?? null;
 
 /* =========================================
    LIMIT: ONLY 1 POWER STATION PER USER
@@ -190,48 +189,51 @@ try {
         INSERT INTO power_stations (
             created_by,
             barangay_id,
-            station_type_id,
+            station_type,
             station_name,
             location_name,
             latitude,
             longitude,
             access_type,
             availability_status,
-            operating_hours,
+            opening_time,
+            closing_time,
+            is_24_hours,
             charging_type,
-            description,
-            image
+            description
         ) VALUES (
             :created_by,
             :barangay_id,
-            :station_type_id,
+            :station_type,
             :station_name,
             :location_name,
             :latitude,
             :longitude,
             :access_type,
             :availability_status,
-            :operating_hours,
+            :opening_time,
+            :closing_time,
+            :is_24_hours,
             :charging_type,
-            :description,
-            :image
+            :description
         )
     ");
 
     $stmt->execute([
         ":created_by" => $user_id,
         ":barangay_id" => $barangay_id,
-        ":station_type_id" => $station_type_id,
+        ":station_type" => $station_type,
         ":station_name" => $station_name,
         ":location_name" => $location_name,
         ":latitude" => $latitude,
         ":longitude" => $longitude,
         ":access_type" => $access_type,
         ":availability_status" => $availability_status,
-        ":operating_hours" => $operating_hours,
+        ":opening_time" => $opening_time,
+        ":closing_time" => $closing_time,
+        ":is_24_hours" => $is_24_hours,
         ":charging_type" => $charging_type,
-        ":description" => $description,
-        ":image" => $image
+        ":description" => $description
     ]);
 
     echo json_encode([
