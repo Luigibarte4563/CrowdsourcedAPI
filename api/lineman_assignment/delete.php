@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../../auth/lineman_access.php';
+require_once __DIR__ . '/../services/create_notification.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -33,18 +34,26 @@ if ($id === false) {
 }
 
 try {
-    /*
-     * Deactivate, do not delete.
-     *
-     * The row is the record that this lineman covered this barangay and who put them
-     * there, and outage_report_updates / outage_report_verifications reference the people
-     * involved, not this pairing. Keeping the row means the audit trail and the
-     * assigned_by attribution outlive the assignment, and it lets a later re-assignment
-     * reactivate the same row instead of inventing a second one (see create.php).
-     *
-     * Filtering on `status = 'active'` makes the operation idempotent: removing an
-     * already-removed assignment is a success, not a confusing 404.
-     */
+    /* Load the assignment details before deactivating so we can notify the lineman. */
+    $assignmentStmt = $conn->prepare("
+        SELECT la.lineman_id, la.barangay_id, b.barangay_name,
+               u.first_name, u.middle_name, u.last_name
+        FROM lineman_assignments la
+        JOIN users u ON u.id = la.lineman_id
+        LEFT JOIN barangays b ON b.id = la.barangay_id
+        WHERE la.id = ?
+        LIMIT 1
+    ");
+    $assignmentStmt->execute([$id]);
+    $assignment = $assignmentStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$assignment) {
+        http_response_code(404);
+        echo json_encode(["success" => false, "message" => "Assignment not found"]);
+        exit;
+    }
+
+    /* Deactivate, do not delete. */
     $stmt = $conn->prepare("
         UPDATE lineman_assignments
         SET status = 'inactive', assigned_by = ?
@@ -54,11 +63,7 @@ try {
 
     if ($stmt->rowCount() === 0) {
         /* Either it never existed, or it was already inactive - tell the two apart. */
-        $existsStmt = $conn->prepare("SELECT id, status FROM lineman_assignments WHERE id = ? LIMIT 1");
-        $existsStmt->execute([$id]);
-        $existing = $existsStmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$existing) {
+        if (!$assignment || $assignment['status'] !== 'active') {
             http_response_code(404);
             echo json_encode(["success" => false, "message" => "Assignment not found"]);
             exit;
@@ -67,11 +72,28 @@ try {
         echo json_encode([
             "success" => true,
             "message" => "Assignment is already inactive",
-            "id" => (int)$existing['id'],
-            "status" => $existing['status']
+            "id" => (int)$assignment['id'],
+            "status" => $assignment['status']
         ]);
         exit;
     }
+
+    /* Notify the lineman that their assignment was removed. */
+    $assignedByStmt = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ? LIMIT 1");
+    $assignedByStmt->execute([current_user_id($user)]);
+    $assignedByRow = $assignedByStmt->fetch(PDO::FETCH_ASSOC);
+    $assignedByName = $assignedByRow
+        ? trim(($assignedByRow['first_name'] ?? '') . ' ' . ($assignedByRow['last_name'] ?? ''))
+        : 'Electric Company';
+    $linemanFullName = trim(($assignment['first_name'] ?? '') . ' ' . (($assignment['middle_name'] ?? null) ? $assignment['middle_name'] . ' ' : '') . ($assignment['last_name'] ?? ''));
+
+    createNotification(
+        $conn,
+        [(int)$assignment['lineman_id']],
+        'Assignment Removed',
+        "Hello {$linemanFullName}, your assignment to {$assignment['barangay_name']} has been removed by {$assignedByName}. You can no longer work on outage reports in that barangay.",
+        'system'
+    );
 
     echo json_encode([
         "success" => true,

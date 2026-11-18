@@ -50,9 +50,9 @@ $sql = "
         orp.updated_at,
         b.id AS barangay_id,
         b.barangay_name,
-        orp.category AS category,
-        orp.severity AS severity,
-        orp.hazard_type AS hazard_type,
+        orp.category,
+        orp.severity,
+        orp.hazard_type,
         orp.status AS status
     FROM outage_reports orp
     LEFT JOIN barangays b    ON b.id = orp.barangay_id

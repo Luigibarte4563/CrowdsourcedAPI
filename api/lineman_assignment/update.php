@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../../auth/lineman_access.php';
+require_once __DIR__ . '/../services/create_notification.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -170,6 +171,47 @@ try {
         SET lineman_id = ?, barangay_id = ?, status = ?, assigned_by = ?
         WHERE id = ?
     ")->execute([$targetLinemanId, $targetBarangayId, $targetStatus, $assignedBy, $id]);
+
+    /* Notify the lineman of assignment changes (status, barangay, or lineman swap). */
+    $assignedByStmt = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ? LIMIT 1");
+    $assignedByStmt->execute([$assignedBy]);
+    $assignedByRow = $assignedByStmt->fetch(PDO::FETCH_ASSOC);
+    $assignedByName = $assignedByRow
+        ? trim(($assignedByRow['first_name'] ?? '') . ' ' . ($assignedByRow['last_name'] ?? ''))
+        : 'Electric Company';
+    $linemanFullName = trim(($lineman['first_name'] ?? '') . ' ' . (($lineman['middle_name'] ?? null) ? $lineman['middle_name'] . ' ' : '') . ($lineman['last_name'] ?? ''));
+
+    $statusChanged = $targetStatus !== $current['status'];
+    $barangayChanged = $targetBarangayId !== (int)$current['barangay_id'];
+    $linemanChanged = $targetLinemanId !== (int)$current['lineman_id'];
+
+    if ($statusChanged || $barangayChanged || $linemanChanged) {
+        if ($targetStatus === 'inactive') {
+            createNotification(
+                $conn,
+                [(int)$targetLinemanId],
+                'Assignment Removed',
+                "Hello {$linemanFullName}, your assignment to {$barangay['barangay_name']} has been removed by {$assignedByName}. You can no longer work on outage reports in that barangay.",
+                'system'
+            );
+        } elseif ($statusChanged && $targetStatus === 'active') {
+            createNotification(
+                $conn,
+                [(int)$targetLinemanId],
+                'Assignment Reactivated',
+                "Hello {$linemanFullName}, your assignment to {$barangay['barangay_name']} has been reactivated by {$assignedByName}. You can now work on outage reports in this barangay again.",
+                'system'
+            );
+        } elseif ($barangayChanged) {
+            createNotification(
+                $conn,
+                [(int)$targetLinemanId],
+                'Barangay Assignment Updated',
+                "Hello {$linemanFullName}, your assigned barangay has been changed to {$barangay['barangay_name']} by {$assignedByName}. You can now work on outage reports in this barangay.",
+                'system'
+            );
+        }
+    }
 } catch (PDOException $e) {
     if ($e->getCode() === '23000') {
         http_response_code(409);

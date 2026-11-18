@@ -35,7 +35,7 @@ try {
             n.user_id,
             n.title,
             n.message,
-            n.notification_type AS type,
+            n.notification_type,
             n.is_read,
             n.outage_report_id,
             n.maintenance_id,

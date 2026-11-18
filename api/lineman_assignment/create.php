@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../config/db_connect.php';
 require_once __DIR__ . '/../../auth/jwt_auth.php';
 require_once __DIR__ . '/../../auth/rbac.php';
 require_once __DIR__ . '/../../auth/lineman_access.php';
+require_once __DIR__ . '/../services/create_notification.php';
 
 $conn = getConnection();
 $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -141,6 +142,26 @@ try {
     }
 
     $conn->commit();
+
+    /* Notify the lineman of their new/reactivated assignment */
+    $assignedByUser = $conn->prepare("SELECT first_name, last_name FROM users WHERE id = ? LIMIT 1");
+    $assignedByUser->execute([$assignedBy]);
+    $assignedByRow = $assignedByUser->fetch(PDO::FETCH_ASSOC);
+    $assignedByName = $assignedByRow
+        ? trim(($assignedByRow['first_name'] ?? '') . ' ' . ($assignedByRow['last_name'] ?? ''))
+        : 'Electric Company';
+
+    $linemanFullName = trim($lineman['first_name'] . ' ' . ($lineman['middle_name'] ? $lineman['middle_name'] . ' ' : '') . $lineman['last_name']);
+
+    createNotification(
+        $conn,
+        [(int)$linemanId],
+        $reactivated ? 'Assignment Reactivated' : 'New Barangay Assignment',
+        $reactivated
+            ? "Your assignment to {$barangay['barangay_name']} has been reactivated by {$assignedByName}. You can now work on outage reports in this barangay again."
+            : "Hello {$linemanFullName}, you have been assigned to {$barangay['barangay_name']} by {$assignedByName}. You can now view and work on outage reports in this barangay.",
+        'system'
+    );
 } catch (PDOException $e) {
     if ($conn->inTransaction()) {
         $conn->rollBack();

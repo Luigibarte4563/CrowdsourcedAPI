@@ -95,8 +95,8 @@ try {
                 "unresolved" => scalarCount($conn, "SELECT COUNT(*) FROM flood_reports WHERE status <> 'cleared'"),
                 "by_level" => groupCount(
                     $conn,
-                    "SELECT severity AS label, COUNT(*) AS `count`
-                     FROM flood_reports GROUP BY severity ORDER BY `count` DESC"
+                    "SELECT fr.severity AS label, COUNT(*) AS `count`
+                     FROM flood_reports fr GROUP BY fr.severity ORDER BY `count` DESC"
                 ),
             ],
             "hazards" => [

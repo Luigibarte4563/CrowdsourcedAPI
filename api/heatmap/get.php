@@ -28,7 +28,7 @@ try {
             o.longitude,
             o.status,
             o.created_at,
-            o.severity AS severity,
+            o.severity,
             COUNT(v.id) AS verified_count
         FROM outage_reports o
         LEFT JOIN barangays b ON b.id = o.barangay_id
